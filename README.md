@@ -85,4 +85,10 @@ Tap the area around the trackpad or palm rest. You should hear a drum sound! Use
 
 ## License
 
-MIT — do whatever you want with it. 🎶
+Copyright (c) 2026 [Il tuo Nome o Cognome]
+
+All rights reserved.
+
+This source code, and any of its derivatives, are strictly confidential and 
+may not be copied, distributed, modified, or used without the express written 
+permission of the copyright holder.
