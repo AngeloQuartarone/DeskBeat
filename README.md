@@ -85,7 +85,7 @@ Tap the area around the trackpad or palm rest. You should hear a drum sound! Use
 
 ## License
 
-Copyright (c) 2026 [Il tuo Nome o Cognome]
+Copyright (c) 2026 Angelo Quartarone
 
 All rights reserved.
 
