@@ -26,8 +26,19 @@ struct ContentView: View {
         VStack(spacing: 0) {
 
             // Header Title
-            HStack {
+            HStack(spacing: 8) {
                 Spacer()
+                
+                if let logoURL = Bundle.module.url(forResource: "logo", withExtension: "png", subdirectory: "images"),
+                   let nsImage = NSImage(contentsOf: logoURL) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 22, height: 22)
+                        .cornerRadius(4)
+                        .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+                }
+                
                 Text("MacBeat")
                     .font(.system(size: 16, weight: .heavy, design: .rounded))
                     .tracking(0.5)

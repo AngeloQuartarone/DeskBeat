@@ -13,7 +13,8 @@ let package = Package(
             path: "Sources/MacBeat",
             exclude: ["Info.plist"],
             resources: [
-                .copy("Resources/Sounds")
+                .copy("Resources/Sounds"),
+                .copy("Resources/images")
             ],
             linkerSettings: [
                 .linkedFramework("AVFoundation"),

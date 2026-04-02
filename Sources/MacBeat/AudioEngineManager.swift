@@ -63,12 +63,14 @@ final class AudioEngineManager: ObservableObject {
         if folderName == "UserSounds" {
             basePaths = [userSoundsDir.path]
         } else {
-            // Cerca direttamente nella radice di Sounds (flat structure)
-            basePaths = [
-                "\(currentDir)/Sources/MacBeat/Resources/Sounds",
-                "\(currentDir)/Resources/Sounds",
-                "\(currentDir)/Sounds"
-            ]
+            var paths: [String] = []
+            if let soundsURL = Bundle.module.url(forResource: "Sounds", withExtension: nil) {
+                paths.append(soundsURL.path)
+            }
+            paths.append("\(currentDir)/Sources/MacBeat/Resources/Sounds")
+            paths.append("\(currentDir)/Resources/Sounds")
+            paths.append("\(currentDir)/Sounds")
+            basePaths = paths
         }
         
         var foundFiles: [String] = []
@@ -133,6 +135,11 @@ final class AudioEngineManager: ObservableObject {
         // Se non trovato, cerchiamo nella radice di Sounds
         if foundURL == nil {
             outerLoop: for ext in extensions {
+                if let moduleURL = Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Sounds") {
+                    foundURL = moduleURL
+                    break outerLoop
+                }
+                
                 let pathsToTry = [
                     "\(currentDir)/Sources/MacBeat/Resources/Sounds/\(name).\(ext)",
                     "\(currentDir)/Resources/Sounds/\(name).\(ext)",

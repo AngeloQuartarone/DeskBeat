@@ -4,18 +4,43 @@ import SwiftUI
 struct MacBeatApp: App {
     @StateObject private var motionManager = MotionManager.shared
 
+    private var menuBarIcon: NSImage? {
+        guard let logoURL = Bundle.module.url(forResource: "logo", withExtension: "png", subdirectory: "images"),
+              let image = NSImage(contentsOf: logoURL) else { return nil }
+        
+        // Resize per la menu bar
+        let size = NSSize(width: 18, height: 18)
+        let newImage = NSImage(size: size)
+        newImage.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: size))
+        newImage.unlockFocus()
+        
+        // Se il logo è monocromatico o con trasparenze, impostare isTemplate a true aiuta col dark/light mode
+        // ma lasciamo la scelta ai colori originali per ora.
+        return newImage
+    }
+
     var body: some Scene {
         MenuBarExtra {
             ContentView(motionManager: motionManager)
         } label: {
-            Image(systemName: "music.note")
-                .renderingMode(.template)
+            if let icon = menuBarIcon {
+                Image(nsImage: icon)
+            } else {
+                Image(systemName: "music.note")
+                    .renderingMode(.template)
+            }
         }
         .menuBarExtraStyle(.window)
     }
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
+        
+        if let logoURL = Bundle.module.url(forResource: "logo", withExtension: "png", subdirectory: "images"),
+           let image = NSImage(contentsOf: logoURL) {
+            NSApplication.shared.applicationIconImage = image
+        }
         
         DispatchQueue.main.async {
             MotionManager.shared.onTapDetected = { side, rawTap in
