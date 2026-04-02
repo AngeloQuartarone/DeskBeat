@@ -19,28 +19,40 @@ struct MacBeatApp: App {
         
         DispatchQueue.main.async {
             MotionManager.shared.onTapDetected = { side, rawTap in
-                // Se siamo nelle impostazioni, forziamo sempre la modalità Standard per testare la sensibilità
+                let isUnlocked = LicenseManager.shared.isUnlocked
+                
+                // 1. Moda Looper
                 if !MotionManager.shared.isShowingSettings && LooperManager.shared.isLooperMode {
-                    // Modalità Looper (solo se non siamo in Settings)
-                    LooperManager.shared.processTap(rawTap: rawTap)
-                } else {
-                    // Modalità Standard (come fallback o se siamo in Settings)
-                    let kit = MotionManager.shared.selectedKit
-                    let isInverted = MotionManager.shared.isInverted
-                    
-                    // Se invertito, scambiamo il suono associato al lato fisico
-                    let effectiveSide = isInverted ? (side == "LEFT" ? "RIGHT" : "LEFT") : side
-                    
-                    let sound: String
-                    if kit == "Custom" {
-                        sound = (effectiveSide == "LEFT") ? MotionManager.shared.standardSideSound : MotionManager.shared.standardTopSound
-                    } else {
-                        // Default: Classic (snare on left/side, kick on right/top)
-                        sound = (effectiveSide == "LEFT") ? "snare" : "kick"
+                    if isUnlocked {
+                        LooperManager.shared.processTap(rawTap: rawTap)
                     }
-                    
-                    AudioEngineManager.shared.playSample(named: sound, source: effectiveSide)
+                    return
                 }
+                
+                // 2. Moda Standard (o Fallback in Settings per test sensibilità)
+                let isCustom = MotionManager.shared.selectedKit == "Custom"
+                
+                // Se siamo nella schermata principale, abbiamo scelto Custom e l'app è bloccata:
+                // l'utente sta vedendo la schermata Licenza. SILENZIAMO TOTALMENTE l'input fisico.
+                if !MotionManager.shared.isShowingSettings && isCustom && !isUnlocked {
+                    return
+                }
+                
+                // Se l'app è bloccata e siamo in "Settings" ignoriamo la selezione "Custom" 
+                // e forziamo "Classic" per permettergli comunque di ascoltare il test di Sensibilità
+                let effectiveKit = (isCustom && !isUnlocked) ? "Classic" : MotionManager.shared.selectedKit
+                
+                let isInverted = MotionManager.shared.isInverted
+                let effectiveSide = isInverted ? (side == "LEFT" ? "RIGHT" : "LEFT") : side
+                
+                let sound: String
+                if effectiveKit == "Custom" {
+                    sound = (effectiveSide == "LEFT") ? MotionManager.shared.standardSideSound : MotionManager.shared.standardTopSound
+                } else {
+                    sound = (effectiveSide == "LEFT") ? "snare" : "kick"
+                }
+                
+                AudioEngineManager.shared.playSample(named: sound, source: effectiveSide)
             }
             
             MotionManager.shared.startMonitoring()

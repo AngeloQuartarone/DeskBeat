@@ -17,6 +17,7 @@ enum AppTab { case play, settings }
 struct ContentView: View {
     @ObservedObject var motionManager: MotionManager
     @ObservedObject var looper = LooperManager.shared
+    @StateObject private var licenseManager = LicenseManager.shared
 
     @State private var visualEffects: [VisualEffect] = []
     @State private var activeTab: AppTab = .play
@@ -81,8 +82,13 @@ struct ContentView: View {
                         StandardModeView(motionManager: motionManager, visualEffects: visualEffects)
                             .transition(.opacity)
                     } else {
-                        LooperModeView(looper: looper, visualEffects: visualEffects)
-                            .transition(.opacity)
+                        if licenseManager.isUnlocked {
+                            LooperModeView(looper: looper, visualEffects: visualEffects)
+                                .transition(.opacity)
+                        } else {
+                            LicenseView()
+                                .transition(.opacity)
+                        }
                     }
                 } else {
                     SettingsView(motionManager: motionManager, looper: looper)

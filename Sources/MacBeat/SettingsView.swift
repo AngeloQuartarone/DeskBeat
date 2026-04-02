@@ -6,6 +6,7 @@ struct SettingsView: View {
     @ObservedObject var motionManager: MotionManager
     @ObservedObject var looper: LooperManager
     @ObservedObject var audioEngine = AudioEngineManager.shared
+    @ObservedObject var licenseManager = LicenseManager.shared
     
     @State private var refreshID = UUID()
 
@@ -37,89 +38,113 @@ struct SettingsView: View {
 
                 Divider().opacity(0.3)
 
-                SettingsSection(title: "LOOPER") {
-                    MacToggleRow(label: "Quantize rhythm", isOn: $looper.isQuantized)
-                    MacMenuRow(label: "Trigger with", selection: $looper.targetInput, options: [
-                        ("TOP",  "Top hit"),
-                        ("SIDE", "Side hit"),
-                    ])
-                }
-
-                Divider().opacity(0.3)
-
-                SettingsSection(title: "USER SOUNDS") {
-                    HStack {
-                        Spacer()
-                        Button(action: addSound) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "plus.circle.fill")
-                                Text("Add Sounds")
-                            }
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(Color.accentColor.opacity(0.15))
-                            .foregroundStyle(Color.accentColor)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
+                Group {
+                    SettingsSection(title: "LOOPER") {
+                        MacToggleRow(label: "Quantize rhythm", isOn: $looper.isQuantized)
+                        MacMenuRow(label: "Trigger with", selection: $looper.targetInput, options: [
+                            ("TOP",  "Top hit"),
+                            ("SIDE", "Side hit"),
+                        ])
                     }
-                    .padding(.bottom, 4)
 
-                    let userSounds = audioEngine.userSounds
-                    
-                    if userSounds.isEmpty {
-                        HStack(spacing: 8) {
-                            Image(systemName: "waveform.badge.plus")
-                                .foregroundStyle(.secondary)
-                            Text("Add your .wav or .mp3 samples")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                    Divider().opacity(0.3)
+
+                    SettingsSection(title: "USER SOUNDS") {
+                        HStack {
                             Spacer()
-                        }
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 10)
-                        .background(Color.primary.opacity(0.03))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    } else {
-                        VStack(spacing: 6) {
-                            ForEach(userSounds, id: \.self) { sound in
-                                HStack {
-                                    Image(systemName: "waveform")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-                                    
-                                    Text(sound)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .lineLimit(1)
-                                    
-                                    Spacer()
-                                    
-                                    Button {
-                                        AudioEngineManager.shared.removeUserSound(named: sound)
-                                        looper.setupDefaultPads()
-                                        refreshID = UUID()
-                                    } label: {
-                                        Image(systemName: "trash")
-                                            .font(.system(size: 11))
-                                            .foregroundStyle(.red.opacity(0.8))
-                                    }
-                                    .buttonStyle(.plain)
+                            Button(action: addSound) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "plus.circle.fill")
+                                    Text("Add Sounds")
                                 }
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 10)
-                                .background(Color.primary.opacity(0.04))
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(Color.accentColor.opacity(0.15))
+                                .foregroundStyle(Color.accentColor)
                                 .clipShape(RoundedRectangle(cornerRadius: 6))
                             }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.bottom, 4)
+
+                        let userSounds = audioEngine.userSounds
+                        
+                        if userSounds.isEmpty {
+                            HStack(spacing: 8) {
+                                Image(systemName: "waveform.badge.plus")
+                                    .foregroundStyle(.secondary)
+                                Text("Add your .wav or .mp3 samples")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .background(Color.primary.opacity(0.03))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        } else {
+                            VStack(spacing: 6) {
+                                ForEach(userSounds, id: \.self) { sound in
+                                    HStack {
+                                        Image(systemName: "waveform")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(.secondary)
+                                        
+                                        Text(sound)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .lineLimit(1)
+                                        
+                                        Spacer()
+                                        
+                                        Button {
+                                            AudioEngineManager.shared.removeUserSound(named: sound)
+                                            looper.setupDefaultPads()
+                                            refreshID = UUID()
+                                        } label: {
+                                            Image(systemName: "trash")
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(.red.opacity(0.8))
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 10)
+                                    .background(Color.primary.opacity(0.04))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                }
+                            }
                         }
                     }
-                }
-                .id(refreshID)
+                    .id(refreshID)
 
-                Divider().opacity(0.3)
+                    Divider().opacity(0.3)
 
-                SettingsSection(title: "ADVANCED") {
-                    MacToggleRow(label: "Play in background", isOn: $motionManager.playInBackground)
+                    SettingsSection(title: "ADVANCED") {
+                        MacToggleRow(label: "Play in background", isOn: $motionManager.playInBackground)
+                    }
                 }
+                .disabled(!licenseManager.isUnlocked)
+                .opacity(licenseManager.isUnlocked ? 1.0 : 0.4)
+                
+                if !licenseManager.isUnlocked {
+                    HStack {
+                        Image(systemName: "lock.fill")
+                        Text("Unlock MacBeat Pro to access all features.")
+                    }
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+                }
+                
+                #if DEBUG
+                Button("Reset License (Debug)") {
+                    licenseManager.clearLicense()
+                }
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.red)
+                .padding(.top, 12)
+                .buttonStyle(.plain)
+                #endif
                 
                 Spacer(minLength: 24)
             }
