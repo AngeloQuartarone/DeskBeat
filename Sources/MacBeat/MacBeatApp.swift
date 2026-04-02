@@ -8,8 +8,6 @@ struct MacBeatApp: App {
         MenuBarExtra {
             ContentView(motionManager: motionManager)
         } label: {
-            // L'icona universale e nativa per "musica".
-            // Il renderingMode template è cruciale per la barra dei menu.
             Image(systemName: "music.note")
                 .renderingMode(.template)
         }

@@ -15,18 +15,17 @@ final class AudioEngineManager {
         do {
             engine.prepare()
             try engine.start()
-            print("[MacBeat] 🔊 Motore Audio Pronto")
+            print("[MacBeat] 🔊 Motore Audio Pronto (Mono/Interrupt)")
         } catch {
             print("❌ Errore critico Audio Engine: \(error)")
         }
     }
-
+    
     /// Scansiona i file audio in una specifica sottocartella di "Sounds"
     func getAvailableSoundFiles(in folderName: String) -> [String] {
         let fileManager = FileManager.default
         let currentDir = fileManager.currentDirectoryPath
         
-        // Percorsi da provare (sviluppo locale vs bundle/dist)
         let basePaths = [
             "\(currentDir)/Sources/MacBeat/Resources/Sounds/\(folderName)",
             "\(currentDir)/Resources/Sounds/\(folderName)",
@@ -111,29 +110,34 @@ final class AudioEngineManager {
     /// Suona un campione in modalità live (bassa latenza, prioritario)
     func playSample(named name: String) {
         guard let playerNode = livePlayerNodes[name], let buffer = audioBuffers[name] else { 
-            // Se non trovato, proviamo a caricarlo al volo (magari è stato appena aggiunto)
             setupNodeAndLoadBuffer(named: name)
-            
-            // Riprova dopo il caricamento al volo
             if let newNode = livePlayerNodes[name], let newBuffer = audioBuffers[name] {
-                if !engine.isRunning { try? engine.start() }
-                newNode.stop()
-                newNode.scheduleBuffer(newBuffer, at: nil, options: .interrupts, completionHandler: nil)
-                newNode.play()
+                playNode(newNode, with: newBuffer)
             }
             return 
         }
         
-        if !engine.isRunning { try? engine.start() }
-        playerNode.stop()
-        playerNode.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
-        playerNode.play()
+        playNode(playerNode, with: buffer)
 
         DispatchQueue.main.async {
             NotificationCenter.default.post(
                 name: NSNotification.Name("MacBeatTriggeredEffect"),
                 object: name
             )
+        }
+    }
+    
+    private func playNode(_ node: AVAudioPlayerNode, with buffer: AVAudioPCMBuffer) {
+        if !engine.isRunning { try? engine.start() }
+        node.stop() // Interrompe il suono precedente (Mono mode)
+        node.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
+        node.play()
+    }
+
+    /// Ferma immediatamente tutti i campioni in riproduzione
+    func stopAllSamples() {
+        for node in livePlayerNodes.values {
+            node.stop()
         }
     }
 }

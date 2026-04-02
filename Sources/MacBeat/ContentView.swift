@@ -1,4 +1,5 @@
 import SwiftUI
+import Cocoa
 
 // MARK: - Data Model
 
@@ -20,6 +21,18 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+
+            // Header Title
+            HStack {
+                Spacer()
+                Text("MacBeat")
+                    .font(.system(size: 16, weight: .black, design: .default))
+                    .tracking(0.5) // Un tracking minore rende il testo un blocco unico e più solido
+                    .foregroundStyle(Color.primary) // Colore pieno al 100%
+                Spacer()
+            }
+            .padding(.top, 12)
+            .padding(.bottom, 20) // Spazio extra sotto
 
             // Top bar
             HStack(spacing: 8) {
@@ -54,7 +67,8 @@ struct ContentView: View {
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.bottom, 10)
+            .padding(.top, 4)
 
             Divider().opacity(0.5)
 
@@ -74,6 +88,35 @@ struct ContentView: View {
         }
         .frame(width: 280)
         .background(.regularMaterial)
+        // Focus Pause: Quando la tendina appare/scompare
+        .onAppear {
+            motionManager.isMonitoring = true
+        }
+        .onDisappear {
+            if !motionManager.playInBackground {
+                motionManager.isMonitoring = false
+                // Reset totale del looper e silenzio immediato
+                looper.reset()
+                AudioEngineManager.shared.stopAllSamples()
+            }
+        }
+        // Supporto per NSPopover (se usato via AppDelegate o altri wrapper)
+        .onReceive(NotificationCenter.default.publisher(for: NSPopover.didShowNotification)) { _ in
+            motionManager.isMonitoring = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSPopover.didCloseNotification)) { _ in
+            if !motionManager.playInBackground {
+                motionManager.isMonitoring = false
+                looper.reset()
+                AudioEngineManager.shared.stopAllSamples()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            silenceIfNeeded()
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.activeSpaceDidChangeNotification)) { _ in
+            silenceIfNeeded()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MacBeatTriggeredEffect"))) { notification in
             guard let instrument = notification.object as? String else { return }
             let effect = VisualEffect(instrument: instrument)
@@ -82,6 +125,16 @@ struct ContentView: View {
                 visualEffects.removeAll { $0.id == effect.id }
             }
         }
+    }
+
+    private func silenceIfNeeded() {
+        if !motionManager.playInBackground {
+            motionManager.isMonitoring = false
+            looper.reset()
+            AudioEngineManager.shared.stopAllSamples()
+        }
+        // Chiudi la finestra nascondendo l'app (comportamento popover)
+        NSApplication.shared.hide(nil)
     }
 }
 
@@ -348,6 +401,8 @@ struct SettingsView: View {
                     .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                     .tracking(0.6)
 
+                MacToggleRow(label: "Quantize rhythm", isOn: $looper.isQuantized)
+
                 MacMenuRow(label: "Trigger with", selection: $looper.targetInput, options: [
                     ("TOP",  "Top hit"),
                     ("SIDE", "Side hit"),
@@ -388,6 +443,18 @@ struct SettingsView: View {
                 .padding(.vertical, 2)
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
+
+            Divider().opacity(0.5)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("ADVANCED")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                    .tracking(0.6)
+
+                MacToggleRow(label: "Play in background", isOn: $motionManager.playInBackground)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
         }
     }
 }
@@ -398,42 +465,19 @@ struct FooterView: View {
     @ObservedObject var motionManager: MotionManager
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button { motionManager.isMonitoring.toggle() } label: {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(motionManager.isMonitoring ? Color.green : Color.red)
-                        .frame(width: 6, height: 6)
-                    Text(motionManager.isMonitoring ? "Active" : "Paused")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(motionManager.isMonitoring ? Color(nsColor: .secondaryLabelColor) : .red)
-                }
-                .padding(.horizontal, 9).padding(.vertical, 4)
-                .background(motionManager.isMonitoring ? Color.primary.opacity(0.05) : Color.red.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(
-                            motionManager.isMonitoring ? Color.primary.opacity(0.1) : Color.red.opacity(0.3),
-                            lineWidth: 0.5
-                        )
-                )
-                .animation(.easeInOut(duration: 0.15), value: motionManager.isMonitoring)
-            }
-            .buttonStyle(.plain)
-
+        HStack {
             Spacer()
-
-            Button("Quit") { NSApplication.shared.terminate(nil) }
-                .font(.system(size: 11))
+            Button("Quit MacBeat") { NSApplication.shared.terminate(nil) }
+                .font(.system(size: 11, weight: .medium))
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 9).padding(.vertical, 4)
-                .background(.primary.opacity(0.05))
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
+                .padding(.horizontal, 12).padding(.vertical, 5)
+                .background(.primary.opacity(0.04))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
+            Spacer()
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.vertical, 10)
         .background(.primary.opacity(0.02))
     }
 }

@@ -3,6 +3,7 @@ import IOKit.hid
 
 final class MotionManager: ObservableObject {
     @Published var isMonitoring: Bool = false
+    @Published var playInBackground: Bool = false
     @Published var isInverted: Bool = false
     @Published var sensitivityLevel: Int = 1
     @Published var selectedKit: String = "Classic" // Può essere "Classic" o "Bongos"

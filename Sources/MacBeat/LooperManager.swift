@@ -20,6 +20,7 @@ final class LooperManager: ObservableObject {
     @Published var isLooperMode: Bool = false
     @Published var targetInput: String = "TOP"
     @Published var currentInstrument: String = "kick"
+    @Published var isQuantized: Bool = true // Nuovo: Attiva/Disattiva la quantizzazione
 
     @Published var state: LooperState = .idle
     @Published var calculatedBPM: Double = 0
@@ -33,6 +34,7 @@ final class LooperManager: ObservableObject {
 
     private var loopStartTime: TimeInterval?
     private var loopDuration: TimeInterval = 0
+    private var beatDuration: TimeInterval = 0 // Servirà per la griglia di quantizzazione
 
     private var silenceTimer: Timer?
     private let silenceThreshold: TimeInterval = 1.5
@@ -108,8 +110,20 @@ final class LooperManager: ObservableObject {
         case .looping:
             let elapsed = now - loopStartTime!
             let rawOffset = elapsed.truncatingRemainder(dividingBy: loopDuration)
-            activeLoopEvents.append((offset: rawOffset, instrument: currentInstrument))
+            
+            // Applica quantizzazione agli overdub se attiva
+            let finalOffset = isQuantized ? quantize(rawOffset) : rawOffset
+            activeLoopEvents.append((offset: finalOffset, instrument: currentInstrument))
         }
+    }
+
+    private func quantize(_ offset: TimeInterval) -> TimeInterval {
+        // Griglia: 1/16th notes (4 per battito)
+        let gridSize = beatDuration / 4.0
+        let quantized = round(offset / gridSize) * gridSize
+        
+        // Evita che sfori la durata del loop (raro ma possibile per arrotondamento)
+        return quantized >= loopDuration ? 0 : quantized
     }
 
     // MARK: - Recording finalization
@@ -137,7 +151,8 @@ final class LooperManager: ObservableObject {
         let totalTappedTime = rawEvents.last!.time
         let beatsBetweenFirstAndLast = max(1.0, round(totalTappedTime / roughBeat))
         let preciseBeat = totalTappedTime / beatsBetweenFirstAndLast
-
+        
+        self.beatDuration = preciseBeat
         self.calculatedBPM = 60.0 / preciseBeat
 
         let totalBeats = beatsBetweenFirstAndLast + 1
@@ -150,7 +165,10 @@ final class LooperManager: ObservableObject {
             if exactOffset >= loopDuration {
                 exactOffset = exactOffset.truncatingRemainder(dividingBy: loopDuration)
             }
-            self.activeLoopEvents.append((offset: exactOffset, instrument: event.name))
+            
+            // Applica quantizzazione se attiva
+            let finalOffset = isQuantized ? quantize(exactOffset) : exactOffset
+            self.activeLoopEvents.append((offset: finalOffset, instrument: event.name))
         }
 
         self.loopStartTime = ProcessInfo.processInfo.systemUptime
@@ -159,8 +177,9 @@ final class LooperManager: ObservableObject {
     }
 
     // MARK: - Playback
-
-    private func startPlayback() {
+    
+    /// Avvia il playback del loop dal principio
+    func startPlayback() {
         playbackTimer?.invalidate()
         self.lastPlayedOffset = -0.001
 
@@ -186,6 +205,12 @@ final class LooperManager: ObservableObject {
 
         RunLoop.main.add(timer, forMode: .common)
         self.playbackTimer = timer
+    }
+    
+    /// Ferma il playback del loop
+    func stopPlayback() {
+        playbackTimer?.invalidate()
+        playbackTimer = nil
     }
 
     // MARK: - Reset
