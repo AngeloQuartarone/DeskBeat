@@ -4,7 +4,7 @@ import IOKit.hid
 final class MotionManager: ObservableObject {
     @Published var isMonitoring: Bool = false
     @Published var isInverted: Bool = false
-    @Published var sensitivityValue: Double = 100
+    @Published var sensitivityLevel: Int = 1
     @Published var selectedKit: String = "Classic" // Può essere "Classic" o "Bongos"
     
     // Cambiato: ora passa (LatoLogico, TipoFisico)
@@ -62,7 +62,15 @@ final class MotionManager: ObservableObject {
         prevLinearX = linearX
         prevLinearZ = linearZ
 
-        let threshold = 0.16 - (sensitivityValue / 100.0 * 0.15)
+        let threshold: Double
+        switch sensitivityLevel {
+        case 1: threshold = 0.010    // Low (Old 50)
+        case 2: threshold = 0.008    // Med (Old 60)
+        case 3: threshold = 0.006    // High (Old 70)
+        case 4: threshold = 0.004    // Extra (Old 80)
+        case 5: threshold = 0.0025   // Max (Old 90ish)
+        default: threshold = 0.010
+        }
         let now = ProcessInfo.processInfo.systemUptime
 
         if isCollecting {

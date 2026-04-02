@@ -324,13 +324,19 @@ struct SettingsView: View {
                     Text("Sensitivity")
                         .font(.system(size: 12))
                     Spacer()
-                    Text("\(Int(motionManager.sensitivityValue))")
+                    Text("Level \(motionManager.sensitivityLevel)")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                 }
 
-                Slider(value: $motionManager.sensitivityValue, in: 1...100)
-                    .tint(.accentColor)
+                Picker("Level", selection: $motionManager.sensitivityLevel) {
+                    Text("Low").tag(1)
+                    Text("Med").tag(2)
+                    Text("High").tag(3)
+                    Text("Extra").tag(4)
+                    Text("Max").tag(5)
+                }
+                .pickerStyle(.segmented)
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
 

@@ -1,94 +1,98 @@
 # 🥁 MacBeat
 
-**Turn your MacBook into a drum machine.** MacBeat is a minimalist macOS Menu Bar app that uses your laptop's built-in accelerometer to detect physical taps on the chassis and plays drum sounds in real time.
+**Turn your MacBook into a professional drum machine.** MacBeat is a high-performance macOS Menu Bar app that uses your laptop's built-in accelerometer to detect physical strikes on the chassis, triggering drum samples with ultra-low latency.
 
 ---
 
-## Requirements
+## 🔥 Key Features
+
+### 1. Two Performance Modes
+*   **Standard Mode**: Real-time triggering of "Kick" and "Snare" (or "Bongo 1" and "Bongo 2"). Use vertical strikes for kicks and lateral strikes for snares. Includes "Invert Sides" for southpaw drummers.
+*   **Looper Mode**: Dynamic pattern recording. Tap a beat, and MacBeat will automatically detect the BPM, quantize your performance, and loop it. Layer more instruments by switching pads mid-session.
+
+### 2. High-Fidelity Tap Detection
+*   **Apple Silicon Support**: Native integration with `AppleSPUHIDDriver` for M1, M2, and M3 Macs.
+*   **Gesture Recognition**: Distinguishes between **Vertical (TOP)** and **Lateral (SIDE)** hits by analyzing peak jerk (rate of change of acceleration).
+*   **Smart Lockout**: A 110ms cooldown window prevents phantom double-triggers from physical vibration.
+
+### 3. Dynamic Sound Loading
+MacBeat automatically scans its internal `Resources` folder for audio files. Add your own `.wav`, `.mp3`, or `.m4a` samples to expand your kit.
+
+### 4. Minimalist Interface
+A sleek, premium macOS popover with real-time visual feedback, kit selection, sensitivity sliders, and live BPM display.
+
+---
+
+## 🛠️ Requirements
 
 - **macOS 14.0+** (Sonoma or later)
-- **Apple Silicon or Intel Mac** with a built-in accelerometer
-- **Xcode 15+** (for building)
-
-## Quick Start
-
-### 1. Add Sound Files
-
-MacBeat requires two short drum samples (`.wav` **or** `.mp3`). Place them in the `Resources/Sounds/` directory:
-
-```
-Resources/
-└── Sounds/
-    ├── kick.wav   (or kick.mp3)
-    └── snare.wav  (or snare.mp3)
-```
-
-> **Tip:** Any short (< 1 second) 44.1 kHz or 48 kHz WAV/MP3 files will work great. You can mix formats (e.g. `kick.wav` + `snare.mp3`). Files are searched in order: `.wav` first, then `.mp3`. You can find free drum samples on sites like [Freesound.org](https://freesound.org) or [SampleSwap.org](https://sampleswap.org).
-
-### 2. Open in Xcode
-
-```bash
-open Package.swift
-```
-
-Or open the `MacBeat` folder directly via **File → Open** in Xcode. Xcode will recognize the Swift Package structure automatically.
-
-### 3. Configure Signing & Entitlements
-
-1. Select the **MacBeat** scheme in the project navigator.
-2. Go to **Signing & Capabilities**.
-3. Select your **Team**.
-4. Under **Code Signing Entitlements**, point to `MacBeat.entitlements`.
-5. **Disable App Sandbox** (required for CoreMotion accelerometer access).
-
-### 4. Build & Run
-
-Press **⌘R**. The 🥁 icon will appear in your menu bar.
-
-### 5. Tap Your Laptop!
-
-Tap the area around the trackpad or palm rest. You should hear a drum sound! Use the menu bar popover to:
-
-- **Toggle** tap detection on/off
-- **Switch** between Kick 🥁 and Snare 🪘
-- **Adjust sensitivity** with the slider (lower = more sensitive)
-- **Test** the sound with the Test button
+- **Apple Silicon Mac** (highly recommended) or Intel Mac with built-in accelerometer
+- **Xcode 15+** (for building from source)
 
 ---
 
-## Architecture
+## 🚀 Quick Start
+
+### 1. Add Sound Files
+Place your samples in the `Sources/MacBeat/Resources/Sounds/` directory:
+
+```text
+Resources/
+└── Sounds/
+    ├── Standard/ 
+    │   ├── kick.wav, snare.wav (or kick.mp3...)
+    │   └── bongo1.wav, bongo2.wav
+    └── Looper/
+        ├── clap.wav, hihat.wav, rim.wav...
+```
+
+### 2. Configure signing & Privacy
+1. Open `Package.swift` in Xcode.
+2. Select the **MacBeat** target.
+3. Under **Signing & Capabilities**:
+    - Set your Development Team.
+    - **Disable App Sandbox** (Required to access low-level HID reports from the accelerometer).
+
+### 3. Build & Run
+Press **⌘R**. The 🎵 icon will appear in your menu bar. 
+
+### 4. Play!
+- **Standard**: Tap the palm rest (Top hit) for Kick, or the side of the chassis (Side hit) for Snare.
+- **Looper**: Switch to Looper mode, select a pad, and start tapping. MacBeat starts recording on the first tap and closes the loop after a brief silence.
+
+---
+
+## 🧠 Technical Details
+
+### Architecture
 
 | File | Purpose |
 |---|---|
-| `MacBeatApp.swift` | SwiftUI `@main` entry point with `MenuBarExtra` |
-| `MenuBarView.swift` | Popover UI (toggle, picker, slider, quit) |
-| `MotionManager.swift` | CoreMotion accelerometer → tap detection |
-| `AudioEngineManager.swift` | AVAudioEngine → low-latency sample playback |
+| `MacBeatApp.swift` | Main entry point, sets up global event handlers and menu bar icon. |
+| `MotionManager.swift` | Wakes `AppleSPUHIDDriver`, parses raw HID reports, and handles peak-jerk tap recognition. |
+| `AudioEngineManager.swift` | Manages `AVAudioEngine` player nodes for zero-latency sample playback. |
+| `LooperManager.swift` | Logic for BPM calculation, quantization, and real-time overdubbing. |
+| `ContentView.swift` | SwiftUI-based UI with two modes and settings panel. |
 
-## How Tap Detection Works
-
-1. The accelerometer is polled at **100 Hz**.
-2. When the **Z-axis acceleration** exceeds the threshold (default 2.0g), a tap is registered.
-3. A **150 ms cooldown** prevents double-triggers from the same physical tap.
-4. The callback fires `AudioEngineManager.playSample()` on the main thread.
-
-## Troubleshooting
-
-| Problem | Solution |
-|---|---|
-| No sound | Make sure `kick.wav` and `snare.wav` are in `Resources/Sounds/` |
-| "Accelerometer not available" | You may be running in the Simulator — use real hardware |
-| Taps not detected | Try lowering the sensitivity (slider toward "High") |
-| App Sandbox errors | Ensure `com.apple.security.app-sandbox` is `false` in entitlements |
+### Tap Recognition Algorithm
+1. Polls raw accelerometer data via `IOHIDManager`.
+2. Filters for linear acceleration (removing gravity).
+3. Detects triggers when the absolute Jerk (Delta of Acceleration) exceeds a user-defined threshold.
+4. Classifies the tap: if `xMagnitude > (zMagnitude * 0.35)`, it's a **SIDE** tap; otherwise, it's a **TOP** tap.
 
 ---
 
-## License
+## 🏗️ Adding Your Own Sounds
+To add new instruments to the Looper:
+1. Drag your files into `Sources/MacBeat/Resources/Sounds/Looper/`.
+2. Rebuild the app.
+3. The UI will automatically generate a new colored pad for each unique filename.
 
-Copyright (c) 2026 Angelo Quartarone
+---
 
-All rights reserved.
+## ⚖️ License
 
-This source code, and any of its derivatives, are strictly confidential and 
-may not be copied, distributed, modified, or used without the express written 
-permission of the copyright holder.
+Copyright (c) 2026 Angelo Quartarone. All rights reserved.
+
+This source code is confidential and private. Unauthorized copying, distribution, or use is strictly prohibited.
+
