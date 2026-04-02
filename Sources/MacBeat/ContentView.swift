@@ -1,5 +1,6 @@
 import SwiftUI
 import Cocoa
+import UniformTypeIdentifiers
 
 // MARK: - Data Model
 
@@ -91,6 +92,7 @@ struct ContentView: View {
         // Focus Pause: Quando la tendina appare/scompare
         .onAppear {
             motionManager.isMonitoring = true
+            activeTab = .play // Torna sempre alla modalità play (Standard o Looper) al riapertura
         }
         .onDisappear {
             if !motionManager.playInBackground {
@@ -103,6 +105,7 @@ struct ContentView: View {
         // Supporto per NSPopover (se usato via AppDelegate o altri wrapper)
         .onReceive(NotificationCenter.default.publisher(for: NSPopover.didShowNotification)) { _ in
             motionManager.isMonitoring = true
+            activeTab = .play // Torna sempre alla modalità play (Standard o Looper) al riapertura
         }
         .onReceive(NotificationCenter.default.publisher(for: NSPopover.didCloseNotification)) { _ in
             if !motionManager.playInBackground {
@@ -124,6 +127,9 @@ struct ContentView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 visualEffects.removeAll { $0.id == effect.id }
             }
+        }
+        .onChange(of: activeTab) { oldValue, newValue in
+            motionManager.isShowingSettings = (newValue == .settings)
         }
     }
 
@@ -363,6 +369,8 @@ struct LooperPadView: View {
 struct SettingsView: View {
     @ObservedObject var motionManager: MotionManager
     @ObservedObject var looper: LooperManager
+    
+    @State private var refreshID = UUID()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -413,35 +421,76 @@ struct SettingsView: View {
             Divider().opacity(0.5)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("SOUNDS")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
-                    .tracking(0.6)
-
-                HStack(spacing: 10) {
-                    Image(systemName: "waveform.badge.plus")
-                        .font(.system(size: 14))
+                HStack {
+                    Text("LOOPER SOUNDS")
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                        .tracking(0.6)
+                    
+                    Spacer()
+                    
+                    Button(action: addSound) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 12))
+                            Text("Add Sounds")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Color.accentColor.opacity(0.1))
+                        .foregroundStyle(Color.accentColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                }
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Upload your own sounds")
+                let userSounds = AudioEngineManager.shared.getUserAddedSounds()
+                
+                if userSounds.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: "waveform.badge.plus")
                             .font(.system(size: 12))
-                        Text("Coming soon")
-                            .font(.system(size: 10))
+                            .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                        Text("Add your .wav or .mp3 samples")
+                            .font(.system(size: 11))
                             .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                     }
-
-                    Spacer()
-
-                    Text("Soon")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(Color.accentColor.opacity(0.1))
-                        .clipShape(Capsule())
+                    .padding(.vertical, 4)
+                } else {
+                    VStack(spacing: 4) {
+                        ForEach(userSounds, id: \.self) { sound in
+                            HStack {
+                                Image(systemName: "waveform")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                                
+                                Text(sound)
+                                    .font(.system(size: 12))
+                                    .lineLimit(1)
+                                
+                                Spacer()
+                                
+                                Button {
+                                    AudioEngineManager.shared.removeUserSound(named: sound)
+                                    looper.setupDefaultPads()
+                                    refreshID = UUID()
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.red.opacity(0.7))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 10)
+                            .background(Color.primary.opacity(0.04))
+                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                        }
+                    }
+                    .padding(.top, 2)
                 }
-                .padding(.vertical, 2)
             }
+            .id(refreshID)
             .padding(.horizontal, 12).padding(.vertical, 10)
 
             Divider().opacity(0.5)
@@ -456,6 +505,27 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
         }
+    }
+
+    private func addSound() {
+        // Forza l'app in primo piano per evitare che il Finder non sia cliccabile al primo colpo
+        NSApp.activate(ignoringOtherApps: true)
+        
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.wav, .mp3]
+        
+        if panel.runModal() == .OK {
+            for url in panel.urls {
+                _ = AudioEngineManager.shared.addUserSound(from: url)
+            }
+            looper.setupDefaultPads()
+            refreshID = UUID()
+        }
+        
+        // Riporta il focus sul popup di MacBeat dopo aver chiuso il Finder
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 

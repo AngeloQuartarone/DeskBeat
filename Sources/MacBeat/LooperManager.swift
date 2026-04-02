@@ -47,7 +47,11 @@ final class LooperManager: ObservableObject {
     
     func setupDefaultPads() {
         let looperSounds = AudioEngineManager.shared.getAvailableSoundFiles(in: "Looper")
-        self.availablePads = looperSounds.enumerated().map { index, filename in
+        let userSounds = AudioEngineManager.shared.getUserAddedSounds()
+        
+        let allSounds = looperSounds + userSounds
+        
+        self.availablePads = allSounds.enumerated().map { index, filename in
             let id = filename
             let name = filename.replacingOccurrences(of: "_", with: " ").capitalized
             let letter = String(name.prefix(1)).uppercased()
@@ -78,6 +82,9 @@ final class LooperManager: ObservableObject {
     func clearInstrument(_ instrument: String) {
     activeLoopEvents.removeAll { $0.instrument == instrument }
     recordedInstrumentsTracker.remove(instrument)
+    
+    // Ferma immediatamente la riproduzione del campione per questo strumento specifico
+    AudioEngineManager.shared.stopSample(named: instrument)
 
     // Se non ci sono più eventi nel loop, resetta tutto allo stato "idle"
     if activeLoopEvents.isEmpty {
@@ -224,5 +231,8 @@ final class LooperManager: ObservableObject {
         calculatedBPM = 0
         state = .idle
         recordedInstrumentsTracker.removeAll()
+        
+        // Ferma immediatamente tutti i suoni in riproduzione
+        AudioEngineManager.shared.stopAllSamples()
     }
 }

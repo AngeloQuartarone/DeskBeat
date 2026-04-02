@@ -9,7 +9,16 @@ final class AudioEngineManager {
     private var livePlayerNodes: [String: AVAudioPlayerNode] = [:]
     private var audioBuffers: [String: AVAudioPCMBuffer] = [:]
     
+    /// Directory per i suoni caricati dall'utente
+    let userSoundsDir: URL
+    
     private init() {
+        let fileManager = FileManager.default
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        userSoundsDir = appSupport.appendingPathComponent("com.macbeat.app/UserSounds", isDirectory: true)
+        
+        try? fileManager.createDirectory(at: userSoundsDir, withIntermediateDirectories: true)
+        
         loadSamples()
         
         do {
@@ -21,19 +30,24 @@ final class AudioEngineManager {
         }
     }
     
-    /// Scansiona i file audio in una specifica sottocartella di "Sounds"
+    /// Scansiona i file audio in una specifica sottocartella di "Sounds" o nella cartella utente
     func getAvailableSoundFiles(in folderName: String) -> [String] {
         let fileManager = FileManager.default
         let currentDir = fileManager.currentDirectoryPath
         
-        let basePaths = [
+        var basePaths = [
             "\(currentDir)/Sources/MacBeat/Resources/Sounds/\(folderName)",
             "\(currentDir)/Resources/Sounds/\(folderName)",
             "\(currentDir)/Sounds/\(folderName)"
         ]
         
+        // Se cerchiamo i suoni utente, aggiungiamo il path dedicato
+        if folderName == "UserSounds" {
+            basePaths = [userSoundsDir.path]
+        }
+        
         var foundFiles: [String] = []
-        let extensions = ["mp3", "wav", "m4a"]
+        let extensions = ["mp3", "wav"] // Solo wav e mp3 come richiesto
         
         for basePath in basePaths {
             if let files = try? fileManager.contentsOfDirectory(atPath: basePath) {
@@ -50,10 +64,16 @@ final class AudioEngineManager {
         return Array(Set(foundFiles)).sorted()
     }
 
+    /// Ritorna la lista dei nomi dei suoni aggiunti dall'utente
+    func getUserAddedSounds() -> [String] {
+        return getAvailableSoundFiles(in: "UserSounds")
+    }
+
     private func loadSamples() {
         let standardSounds = getAvailableSoundFiles(in: "Standard")
         let looperSounds = getAvailableSoundFiles(in: "Looper")
-        let allSounds = standardSounds + looperSounds
+        let userSounds = getUserAddedSounds()
+        let allSounds = standardSounds + looperSounds + userSounds
         
         for name in allSounds {
             setupNodeAndLoadBuffer(named: name)
@@ -66,22 +86,34 @@ final class AudioEngineManager {
         let fileManager = FileManager.default
         let currentDir = fileManager.currentDirectoryPath
         let folders = ["Standard", "Looper"]
-        let extensions = ["mp3", "wav", "m4a"]
+        let extensions = ["mp3", "wav"] // Solo wav e mp3
         
         var foundURL: URL? = nil
         
-        outerLoop: for folder in folders {
-            for ext in extensions {
-                let pathsToTry = [
-                    "\(currentDir)/Sources/MacBeat/Resources/Sounds/\(folder)/\(name).\(ext)",
-                    "\(currentDir)/Resources/Sounds/\(folder)/\(name).\(ext)",
-                    "\(currentDir)/\(folder)/\(name).\(ext)"
-                ]
-                
-                for path in pathsToTry {
-                    if fileManager.fileExists(atPath: path) {
-                        foundURL = URL(fileURLWithPath: path)
-                        break outerLoop
+        // Prima cerchiamo nei suoni utente (hanno la priorità in caso di omonimia)
+        for ext in extensions {
+            let userPath = userSoundsDir.appendingPathComponent("\(name).\(ext)")
+            if fileManager.fileExists(atPath: userPath.path) {
+                foundURL = userPath
+                break
+            }
+        }
+        
+        // Se non trovato, cerchiamo nelle risorse predefinite
+        if foundURL == nil {
+            outerLoop: for folder in folders {
+                for ext in extensions {
+                    let pathsToTry = [
+                        "\(currentDir)/Sources/MacBeat/Resources/Sounds/\(folder)/\(name).\(ext)",
+                        "\(currentDir)/Resources/Sounds/\(folder)/\(name).\(ext)",
+                        "\(currentDir)/\(folder)/\(name).\(ext)"
+                    ]
+                    
+                    for path in pathsToTry {
+                        if fileManager.fileExists(atPath: path) {
+                            foundURL = URL(fileURLWithPath: path)
+                            break outerLoop
+                        }
                     }
                 }
             }
@@ -138,6 +170,59 @@ final class AudioEngineManager {
     func stopAllSamples() {
         for node in livePlayerNodes.values {
             node.stop()
+        }
+    }
+
+    /// Ferma un campione specifico immediatamente
+    func stopSample(named name: String) {
+        livePlayerNodes[name]?.stop()
+    }
+
+    // MARK: - User Sound Management
+
+    /// Aggiunge un nuovo suono utente copiandolo nella directory dedicata
+    func addUserSound(from url: URL) -> String? {
+        let ext = url.pathExtension.lowercased()
+        guard ext == "wav" || ext == "mp3" else { return nil }
+        
+        let fileName = url.deletingPathExtension().lastPathComponent
+        let destinationURL = userSoundsDir.appendingPathComponent("\(fileName).\(ext)")
+        
+        do {
+            // Se esiste già, lo rimuoviamo per sovrascriverlo
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                try FileManager.default.removeItem(at: destinationURL)
+            }
+            try FileManager.default.copyItem(at: url, to: destinationURL)
+            
+            // Carica immediatamente il nuovo suono nel motore audio
+            setupNodeAndLoadBuffer(named: fileName)
+            return fileName
+        } catch {
+            print("❌ Errore durante l'aggiunta del suono: \(error)")
+            return nil
+        }
+    }
+
+    /// Rimuove un suono utente
+    func removeUserSound(named name: String) {
+        let fileManager = FileManager.default
+        let extensions = ["mp3", "wav"]
+        
+        for ext in extensions {
+            let fileURL = userSoundsDir.appendingPathComponent("\(name).\(ext)")
+            if fileManager.fileExists(atPath: fileURL.path) {
+                try? fileManager.removeItem(at: fileURL)
+            }
+        }
+        
+        // Rimuovi dal motore audio
+        if let node = livePlayerNodes[name] {
+            node.stop()
+            engine.detach(node)
+            livePlayerNodes.removeValue(forKey: name)
+            audioBuffers.removeValue(forKey: name)
+            print("[MacBeat] 🗑️ Rimosso: \(name)")
         }
     }
 }

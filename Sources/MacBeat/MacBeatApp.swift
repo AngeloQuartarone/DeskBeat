@@ -19,11 +19,12 @@ struct MacBeatApp: App {
         
         DispatchQueue.main.async {
             MotionManager.shared.onTapDetected = { side, rawTap in
-                if LooperManager.shared.isLooperMode {
-                    // Modalità Looper
+                // Se siamo nelle impostazioni, forziamo sempre la modalità Standard per testare la sensibilità
+                if !MotionManager.shared.isShowingSettings && LooperManager.shared.isLooperMode {
+                    // Modalità Looper (solo se non siamo in Settings)
                     LooperManager.shared.processTap(rawTap: rawTap)
                 } else {
-                    // Modalità Standard con selezione del Kit
+                    // Modalità Standard (come fallback o se siamo in Settings)
                     let kit = MotionManager.shared.selectedKit
                     let isInverted = MotionManager.shared.isInverted
                     

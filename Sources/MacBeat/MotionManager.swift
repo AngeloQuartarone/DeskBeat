@@ -7,6 +7,7 @@ final class MotionManager: ObservableObject {
     @Published var isInverted: Bool = false
     @Published var sensitivityLevel: Int = 1
     @Published var selectedKit: String = "Classic" // Può essere "Classic" o "Bongos"
+    @Published var isShowingSettings: Bool = false
     
     // Cambiato: ora passa (LatoLogico, TipoFisico)
     var onTapDetected: ((String, String) -> Void)?
@@ -24,6 +25,9 @@ final class MotionManager: ObservableObject {
     private let collectionWindowDuration: TimeInterval = 0.015
     private var peakJerkX: Double = 0
     private var peakJerkZ: Double = 0
+    
+    /// Numero di report da saltare all'avvio per stabilizzare i filtri
+    private var isFirstReport: Bool = true
 
     static let shared = MotionManager()
 
@@ -35,7 +39,6 @@ final class MotionManager: ObservableObject {
 
     func startMonitoring() {
         guard let manager = hidManager else { return }
-        self.isMonitoring = true
         IOHIDManagerSetDeviceMatching(manager, [kIOHIDDeviceUsagePageKey: 0xFF00, kIOHIDDeviceUsageKey: 3] as CFDictionary)
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         IOHIDManagerRegisterDeviceMatchingCallback(manager, { context, _, _, device in
@@ -54,6 +57,16 @@ final class MotionManager: ObservableObject {
         let zRaw = Int32(bitPattern: (UInt32(report[17]) << 24) | (UInt32(report[16]) << 16) | (UInt32(report[15]) << 8) | UInt32(report[14]))
         let x = Double(xRaw) / 65536.0
         let z = Double(zRaw) / 65536.0
+
+        if isFirstReport {
+            gravityX = x
+            gravityZ = z
+            prevLinearX = 0
+            prevLinearZ = 0
+            isFirstReport = false
+            return
+        }
+
         gravityX = (x * 0.1) + (gravityX * 0.9)
         gravityZ = (z * 0.1) + (gravityZ * 0.9)
         let linearX = x - gravityX
