@@ -119,12 +119,14 @@ final class LooperManager: ObservableObject {
             resetSilenceTimer(now: now)
 
         case .recording:
-            let elapsed = now - loopStartTime!
+            guard let startTime = loopStartTime else { return }
+            let elapsed = now - startTime
             rawEvents.append((currentInstrument, elapsed))
             resetSilenceTimer(now: now)
 
         case .looping:
-            let elapsed = now - loopStartTime!
+            guard let startTime = loopStartTime else { return }
+            let elapsed = now - startTime
             let rawOffset = elapsed.truncatingRemainder(dividingBy: loopDuration)
             
             // Applica quantizzazione agli overdub se attiva
@@ -203,7 +205,8 @@ final class LooperManager: ObservableObject {
             guard let self = self, self.state == .looping else { return }
 
             let currentTime = ProcessInfo.processInfo.systemUptime
-            let currentOffset = (currentTime - self.loopStartTime!).truncatingRemainder(dividingBy: self.loopDuration)
+            guard let startTime = self.loopStartTime else { return }
+            let currentOffset = (currentTime - startTime).truncatingRemainder(dividingBy: self.loopDuration)
 
             if currentOffset < self.lastPlayedOffset {
                 self.lastPlayedOffset = -0.001

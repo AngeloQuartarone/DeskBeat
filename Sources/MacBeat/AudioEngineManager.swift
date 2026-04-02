@@ -26,7 +26,7 @@ final class AudioEngineManager: ObservableObject {
     
     private init() {
         let fileManager = FileManager.default
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = try! fileManager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         userSoundsDir = appSupport.appendingPathComponent("com.macbeat.app/UserSounds", isDirectory: true)
         
         try? fileManager.createDirectory(at: userSoundsDir, withIntermediateDirectories: true)
@@ -92,18 +92,14 @@ final class AudioEngineManager: ObservableObject {
     /// Forza il rinfresco della lista suoni utente (chiamata dai metodi di aggiunta/rimozione)
     func refreshUserSounds() {
         let sounds = getAvailableSoundFiles(in: "UserSounds")
-        if Thread.isMainThread {
+        DispatchQueue.main.async {
             self.userSounds = sounds
-        } else {
-            DispatchQueue.main.async {
-                self.userSounds = sounds
-            }
         }
     }
 
-    /// Ritorna la lista dei nomi dei suoni aggiunti dall'utente (Legacy, use .userSounds)
+    /// Ritorna la lista dei nomi dei suoni aggiunti dall'utente
     func getUserAddedSounds() -> [String] {
-        return userSounds
+        return getAvailableSoundFiles(in: "UserSounds")
     }
 
     private func loadSamples() {

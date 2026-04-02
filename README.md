@@ -8,7 +8,7 @@
 
 ### 1. Two Performance Modes
 *   **Standard Mode**: Real-time triggering of "Kick" and "Snare" (or "Bongo 1" and "Bongo 2"). Use vertical strikes for kicks and lateral strikes for snares. Includes "Invert Sides" for southpaw drummers.
-*   **Looper Mode**: Dynamic pattern recording. Tap a beat, and MacBeat will automatically detect the BPM, quantize your performance, and loop it. Layer more instruments by switching pads mid-session.
+*   **Looper Mode**: Dynamic pattern recording using a focused, single-input trigger (Top or Side). Select an instrument on screen and tap your rhythm. MacBeat automatically detects the BPM, quantizes your performance, and loops it. Layer more instruments by switching pads mid-session.
 
 ### 2. High-Fidelity Tap Detection
 *   **Apple Silicon Support**: Native integration with `AppleSPUHIDDriver` for M1, M2, and M3 Macs, bypassing legacy SMS APIs.
@@ -17,7 +17,7 @@
 *   **5-Level Sensitivity**: Adjustable thresholds from "Low" for heavy hitters to "Max" for delicate, finger-tip drumming.
 
 ### 3. Infinite Sound Customization
-Import your own `.wav` or `.mp3` samples directly through the Settings UI. MacBeat automatically generates new, color-coded pads for each unique sound, allowing you to build completely custom kits on the fly.
+Import your own `.wav` or `.mp3` samples directly through the Settings UI. MacBeat securely preserves your custom sound library inside macOS's native `Application Support`, instantly generating new, color-coded pads for each unique sound that synchronize perfectly on the fly.
 
 ### 4. Smart Focus Management
 To preserve battery and prevent accidental triggers, MacBeat only monitors the accelerometer when the popover is visible or when explicitly set to "Play in background".
@@ -61,7 +61,11 @@ Go to **Settings** (gear icon) and click **"Add Sounds"**. Select your audio fil
 | `MotionManager.swift` | Manages `IOHIDManager`, wakes `AppleSPUHIDDriver`, and handles peak-jerk tap recognition. |
 | `AudioEngineManager.swift` | Low-latency `AVAudioEngine` implementation with dynamic sample management. |
 | `LooperManager.swift` | Real-time rhythm logic: BPM detection, quantization, and event scheduling. |
-| `ContentView.swift` | Modern SwiftUI interface with responsive visual feedback. |
+| `ContentView.swift` | Modern SwiftUI entry point acting as a macroscopic layout router. |
+| `StandardModeView.swift` | Dedicated interface for real-time live performance mapping. |
+| `LooperModeView.swift` | Dedicated UI for dynamic pattern visualization and overdubbing control. |
+| `SettingsView.swift` | Interface for configuration: thresholds, bindings, and custom sound imports. |
+| `MacBeatComponents.swift` | Reusable UI library (e.g., `DrumPadView`, responsive `LooperPadView`). |
 
 ### Tap Recognition Algorithm
 1. **Raw Data**: Polls 3-axis accelerometer data at high frequency via HID.
