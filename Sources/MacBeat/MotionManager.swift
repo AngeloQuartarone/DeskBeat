@@ -13,6 +13,12 @@ final class MotionManager: ObservableObject {
     @Published var selectedKit: String = UserDefaults.standard.string(forKey: "selectedKit") ?? "Classic" {
         didSet { UserDefaults.standard.set(selectedKit, forKey: "selectedKit") }
     }
+    @Published var standardSideSound: String = UserDefaults.standard.string(forKey: "standardSideSound") ?? "snare" {
+        didSet { UserDefaults.standard.set(standardSideSound, forKey: "standardSideSound") }
+    }
+    @Published var standardTopSound: String = UserDefaults.standard.string(forKey: "standardTopSound") ?? "kick" {
+        didSet { UserDefaults.standard.set(standardTopSound, forKey: "standardTopSound") }
+    }
     @Published var isShowingSettings: Bool = false
     
     // Cambiato: ora passa (LatoLogico, TipoFisico)

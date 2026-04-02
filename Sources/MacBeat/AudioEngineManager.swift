@@ -2,8 +2,9 @@ import AVFoundation
 import AudioToolbox
 import Foundation
 
-final class AudioEngineManager {
+final class AudioEngineManager: ObservableObject {
     static let shared = AudioEngineManager()
+    @Published var userSounds: [String] = []
     private let engine = AVAudioEngine()
     private let limiter: AVAudioUnitEffect = {
         var description = AudioComponentDescription()
@@ -41,6 +42,7 @@ final class AudioEngineManager {
         engine.connect(limiter, to: engine.outputNode, format: format)
 
         loadSamples()
+        refreshUserSounds()
         
         do {
             engine.prepare()
@@ -87,9 +89,21 @@ final class AudioEngineManager {
         return Array(Set(foundFiles)).sorted()
     }
 
-    /// Ritorna la lista dei nomi dei suoni aggiunti dall'utente
+    /// Forza il rinfresco della lista suoni utente (chiamata dai metodi di aggiunta/rimozione)
+    func refreshUserSounds() {
+        let sounds = getAvailableSoundFiles(in: "UserSounds")
+        if Thread.isMainThread {
+            self.userSounds = sounds
+        } else {
+            DispatchQueue.main.async {
+                self.userSounds = sounds
+            }
+        }
+    }
+
+    /// Ritorna la lista dei nomi dei suoni aggiunti dall'utente (Legacy, use .userSounds)
     func getUserAddedSounds() -> [String] {
-        return getAvailableSoundFiles(in: "UserSounds")
+        return userSounds
     }
 
     private func loadSamples() {
@@ -165,7 +179,7 @@ final class AudioEngineManager {
     }
 
     /// Suona un campione in modalità live (Dual-Voice Polyphony per evitare click)
-    func playSample(named name: String) {
+    func playSample(named name: String, source: String? = nil) {
         guard let nodes = livePlayerNodes[name], let buffer = audioBuffers[name] else { 
             setupNodeAndLoadBuffer(named: name)
             if let newNodes = livePlayerNodes[name], let newBuffer = audioBuffers[name] {
@@ -183,7 +197,8 @@ final class AudioEngineManager {
         DispatchQueue.main.async {
             NotificationCenter.default.post(
                 name: NSNotification.Name("MacBeatTriggeredEffect"),
-                object: name
+                object: name,
+                userInfo: source != nil ? ["source": source!] : nil
             )
         }
     }
@@ -233,6 +248,7 @@ final class AudioEngineManager {
             
             // Carica immediatamente il nuovo suono nel motore audio
             setupNodeAndLoadBuffer(named: fileName)
+            refreshUserSounds()
             return fileName
         } catch {
             print("❌ Errore durante l'aggiunta del suono: \(error)")
@@ -263,5 +279,8 @@ final class AudioEngineManager {
             audioBuffers.removeValue(forKey: name)
             print("[MacBeat] 🗑️ Rimosso: \(name)")
         }
+        
+        // Forza l'aggiornamento della lista (fuori da if let per coprire casi non caricati)
+        refreshUserSounds()
     }
 }

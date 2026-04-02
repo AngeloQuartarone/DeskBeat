@@ -32,13 +32,14 @@ struct MacBeatApp: App {
                     let effectiveSide = isInverted ? (side == "LEFT" ? "RIGHT" : "LEFT") : side
                     
                     let sound: String
-                    if kit == "Bongos" {
-                        sound = (effectiveSide == "LEFT") ? "bongo1" : "bongo2"
+                    if kit == "Custom" {
+                        sound = (effectiveSide == "LEFT") ? MotionManager.shared.standardSideSound : MotionManager.shared.standardTopSound
                     } else {
+                        // Default: Classic (snare on left/side, kick on right/top)
                         sound = (effectiveSide == "LEFT") ? "snare" : "kick"
                     }
                     
-                    AudioEngineManager.shared.playSample(named: sound)
+                    AudioEngineManager.shared.playSample(named: sound, source: effectiveSide)
                 }
             }
             
