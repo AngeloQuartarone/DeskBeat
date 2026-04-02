@@ -4,9 +4,15 @@ import IOKit.hid
 final class MotionManager: ObservableObject {
     @Published var isMonitoring: Bool = false
     @Published var playInBackground: Bool = false
-    @Published var isInverted: Bool = false
-    @Published var sensitivityLevel: Int = 1
-    @Published var selectedKit: String = "Classic" // Può essere "Classic" o "Bongos"
+    @Published var isInverted: Bool = UserDefaults.standard.bool(forKey: "isInverted") {
+        didSet { UserDefaults.standard.set(isInverted, forKey: "isInverted") }
+    }
+    @Published var sensitivityLevel: Int = UserDefaults.standard.integer(forKey: "sensitivityLevel") == 0 ? 1 : UserDefaults.standard.integer(forKey: "sensitivityLevel") {
+        didSet { UserDefaults.standard.set(sensitivityLevel, forKey: "sensitivityLevel") }
+    }
+    @Published var selectedKit: String = UserDefaults.standard.string(forKey: "selectedKit") ?? "Classic" {
+        didSet { UserDefaults.standard.set(selectedKit, forKey: "selectedKit") }
+    }
     @Published var isShowingSettings: Bool = false
     
     // Cambiato: ora passa (LatoLogico, TipoFisico)

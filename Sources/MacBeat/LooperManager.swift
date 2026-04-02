@@ -18,9 +18,13 @@ final class LooperManager: ObservableObject {
     static let shared = LooperManager()
 
     @Published var isLooperMode: Bool = false
-    @Published var targetInput: String = "TOP"
+    @Published var targetInput: String = UserDefaults.standard.string(forKey: "targetInput") ?? "TOP" {
+        didSet { UserDefaults.standard.set(targetInput, forKey: "targetInput") }
+    }
     @Published var currentInstrument: String = "kick"
-    @Published var isQuantized: Bool = true // Nuovo: Attiva/Disattiva la quantizzazione
+    @Published var isQuantized: Bool = (UserDefaults.standard.object(forKey: "isQuantized") as? Bool) ?? true {
+        didSet { UserDefaults.standard.set(isQuantized, forKey: "isQuantized") }
+    }
 
     @Published var state: LooperState = .idle
     @Published var calculatedBPM: Double = 0
@@ -46,9 +50,14 @@ final class LooperManager: ObservableObject {
     }
     
     func setupDefaultPads() {
-        let looperSounds = AudioEngineManager.shared.getAvailableSoundFiles(in: "Looper")
+        let availableBase = AudioEngineManager.shared.getAvailableSoundFiles(in: "Base")
+        let baseSet = ["bass", "clap", "hihat", "kick", "snare"]
+        
+        // Filtra i suoni della cartella Sounds basandosi sull'elenco richiesto
+        let looperSounds = availableBase.filter { baseSet.contains($0) }
         let userSounds = AudioEngineManager.shared.getUserAddedSounds()
         
+        // Uniamo i due set (suoni base richiesti + suoni aggiunti dall'utente)
         let allSounds = looperSounds + userSounds
         
         self.availablePads = allSounds.enumerated().map { index, filename in

@@ -1,12 +1,23 @@
 import AVFoundation
+import AudioToolbox
 import Foundation
 
 final class AudioEngineManager {
     static let shared = AudioEngineManager()
     private let engine = AVAudioEngine()
+    private let limiter: AVAudioUnitEffect = {
+        var description = AudioComponentDescription()
+        description.componentType = kAudioUnitType_Effect
+        description.componentSubType = kAudioUnitSubType_PeakLimiter
+        description.componentManufacturer = kAudioUnitManufacturer_Apple
+        description.componentFlags = 0
+        description.componentFlagsMask = 0
+        return AVAudioUnitEffect(audioComponentDescription: description)
+    }()
     
-    // Player nodes per il trigger live (bassa latenza)
-    private var livePlayerNodes: [String: AVAudioPlayerNode] = [:]
+    // Player nodes per il trigger live (Dual-Voice Polyphony per evitare click/pop)
+    private var livePlayerNodes: [String: [AVAudioPlayerNode]] = [:]
+    private var nodePointers: [String: Int] = [:] // Traccia quale voce usare (0 o 1)
     private var audioBuffers: [String: AVAudioPCMBuffer] = [:]
     
     /// Directory per i suoni caricati dall'utente
@@ -19,6 +30,16 @@ final class AudioEngineManager {
         
         try? fileManager.createDirectory(at: userSoundsDir, withIntermediateDirectories: true)
         
+        // Configura il limitatore sull'uscita master per prevenire il clipping digitale (distorsione)
+        // Nota: AVAudioUnitEffect (PeakLimiter) non ha una proprietà .threshold diretta in Swift,
+        // ma funge da brickwall limiter predefinito sullo 0dB.
+        engine.attach(limiter)
+        
+        // Re-routing: Mixer -> Limiter -> Output
+        let format = engine.mainMixerNode.outputFormat(forBus: 0)
+        engine.connect(engine.mainMixerNode, to: limiter, format: format)
+        engine.connect(limiter, to: engine.outputNode, format: format)
+
         loadSamples()
         
         do {
@@ -30,20 +51,22 @@ final class AudioEngineManager {
         }
     }
     
-    /// Scansiona i file audio in una specifica sottocartella di "Sounds" o nella cartella utente
+    /// Scansiona i file audio nella directory "Sounds" o nella cartella utente
     func getAvailableSoundFiles(in folderName: String) -> [String] {
         let fileManager = FileManager.default
         let currentDir = fileManager.currentDirectoryPath
         
-        var basePaths = [
-            "\(currentDir)/Sources/MacBeat/Resources/Sounds/\(folderName)",
-            "\(currentDir)/Resources/Sounds/\(folderName)",
-            "\(currentDir)/Sounds/\(folderName)"
-        ]
+        var basePaths: [String]
         
-        // Se cerchiamo i suoni utente, aggiungiamo il path dedicato
         if folderName == "UserSounds" {
             basePaths = [userSoundsDir.path]
+        } else {
+            // Cerca direttamente nella radice di Sounds (flat structure)
+            basePaths = [
+                "\(currentDir)/Sources/MacBeat/Resources/Sounds",
+                "\(currentDir)/Resources/Sounds",
+                "\(currentDir)/Sounds"
+            ]
         }
         
         var foundFiles: [String] = []
@@ -70,10 +93,9 @@ final class AudioEngineManager {
     }
 
     private func loadSamples() {
-        let standardSounds = getAvailableSoundFiles(in: "Standard")
-        let looperSounds = getAvailableSoundFiles(in: "Looper")
+        let baseSounds = getAvailableSoundFiles(in: "Base")
         let userSounds = getUserAddedSounds()
-        let allSounds = standardSounds + looperSounds + userSounds
+        let allSounds = baseSounds + userSounds
         
         for name in allSounds {
             setupNodeAndLoadBuffer(named: name)
@@ -85,7 +107,6 @@ final class AudioEngineManager {
         
         let fileManager = FileManager.default
         let currentDir = fileManager.currentDirectoryPath
-        let folders = ["Standard", "Looper"]
         let extensions = ["mp3", "wav"] // Solo wav e mp3
         
         var foundURL: URL? = nil
@@ -99,21 +120,19 @@ final class AudioEngineManager {
             }
         }
         
-        // Se non trovato, cerchiamo nelle risorse predefinite
+        // Se non trovato, cerchiamo nella radice di Sounds
         if foundURL == nil {
-            outerLoop: for folder in folders {
-                for ext in extensions {
-                    let pathsToTry = [
-                        "\(currentDir)/Sources/MacBeat/Resources/Sounds/\(folder)/\(name).\(ext)",
-                        "\(currentDir)/Resources/Sounds/\(folder)/\(name).\(ext)",
-                        "\(currentDir)/\(folder)/\(name).\(ext)"
-                    ]
-                    
-                    for path in pathsToTry {
-                        if fileManager.fileExists(atPath: path) {
-                            foundURL = URL(fileURLWithPath: path)
-                            break outerLoop
-                        }
+            outerLoop: for ext in extensions {
+                let pathsToTry = [
+                    "\(currentDir)/Sources/MacBeat/Resources/Sounds/\(name).\(ext)",
+                    "\(currentDir)/Resources/Sounds/\(name).\(ext)",
+                    "\(currentDir)/Sounds/\(name).\(ext)"
+                ]
+                
+                for path in pathsToTry {
+                    if fileManager.fileExists(atPath: path) {
+                        foundURL = URL(fileURLWithPath: path)
+                        break outerLoop
                     }
                 }
             }
@@ -125,11 +144,17 @@ final class AudioEngineManager {
                 let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length))!
                 try file.read(into: buffer)
                 
-                let liveNode = AVAudioPlayerNode()
-                engine.attach(liveNode)
-                engine.connect(liveNode, to: engine.mainMixerNode, format: file.processingFormat)
+                var nodes: [AVAudioPlayerNode] = []
+                for _ in 0..<2 {
+                    let liveNode = AVAudioPlayerNode()
+                    liveNode.volume = 0.85 // Headroom per la polifonia (evita di colpire troppo duro il limiter)
+                    engine.attach(liveNode)
+                    engine.connect(liveNode, to: engine.mainMixerNode, format: file.processingFormat)
+                    nodes.append(liveNode)
+                }
                 
-                livePlayerNodes[name] = liveNode
+                livePlayerNodes[name] = nodes
+                nodePointers[name] = 0
                 audioBuffers[name] = buffer
                 
                 print("[MacBeat] ✅ Caricato: \(name).\(url.pathExtension)")
@@ -139,17 +164,21 @@ final class AudioEngineManager {
         }
     }
 
-    /// Suona un campione in modalità live (bassa latenza, prioritario)
+    /// Suona un campione in modalità live (Dual-Voice Polyphony per evitare click)
     func playSample(named name: String) {
-        guard let playerNode = livePlayerNodes[name], let buffer = audioBuffers[name] else { 
+        guard let nodes = livePlayerNodes[name], let buffer = audioBuffers[name] else { 
             setupNodeAndLoadBuffer(named: name)
-            if let newNode = livePlayerNodes[name], let newBuffer = audioBuffers[name] {
-                playNode(newNode, with: newBuffer)
+            if let newNodes = livePlayerNodes[name], let newBuffer = audioBuffers[name] {
+                let pointer = nodePointers[name] ?? 0
+                playNode(newNodes[pointer], with: newBuffer)
+                nodePointers[name] = (pointer + 1) % 2
             }
             return 
         }
         
-        playNode(playerNode, with: buffer)
+        let pointer = nodePointers[name] ?? 0
+        playNode(nodes[pointer], with: buffer)
+        nodePointers[name] = (pointer + 1) % 2
 
         DispatchQueue.main.async {
             NotificationCenter.default.post(
@@ -161,21 +190,28 @@ final class AudioEngineManager {
     
     private func playNode(_ node: AVAudioPlayerNode, with buffer: AVAudioPCMBuffer) {
         if !engine.isRunning { try? engine.start() }
-        node.stop() // Interrompe il suono precedente (Mono mode)
+        // Non fermiamo il nodo bruscamente per permettere polifonia ed evitare click.
+        // scheduleBuffer con .interrupts pulisce eventuali playback precedenti sullo stesso nodo in modo sicuro.
         node.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
         node.play()
     }
 
     /// Ferma immediatamente tutti i campioni in riproduzione
     func stopAllSamples() {
-        for node in livePlayerNodes.values {
-            node.stop()
+        for nodeList in livePlayerNodes.values {
+            for node in nodeList {
+                node.stop()
+            }
         }
     }
 
     /// Ferma un campione specifico immediatamente
     func stopSample(named name: String) {
-        livePlayerNodes[name]?.stop()
+        if let nodes = livePlayerNodes[name] {
+            for node in nodes {
+                node.stop()
+            }
+        }
     }
 
     // MARK: - User Sound Management
@@ -217,10 +253,13 @@ final class AudioEngineManager {
         }
         
         // Rimuovi dal motore audio
-        if let node = livePlayerNodes[name] {
-            node.stop()
-            engine.detach(node)
+        if let nodes = livePlayerNodes[name] {
+            for node in nodes {
+                node.stop()
+                engine.detach(node)
+            }
             livePlayerNodes.removeValue(forKey: name)
+            nodePointers.removeValue(forKey: name)
             audioBuffers.removeValue(forKey: name)
             print("[MacBeat] 🗑️ Rimosso: \(name)")
         }
