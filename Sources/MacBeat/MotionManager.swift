@@ -1,6 +1,29 @@
 import Foundation
 import IOKit.hid
 
+// Struttura interna per gestire la fisica di ogni singolo sensore separatamente
+private class DeviceState {
+    var gravityX: Double = 0
+    var gravityZ: Double = 0
+    var prevLinearX: Double = 0
+    var prevLinearZ: Double = 0
+    var isFirstReport: Bool = true
+    var isCollecting: Bool = false
+    var collectionStartTime: TimeInterval = 0
+    var peakJerkX: Double = 0
+    var peakJerkZ: Double = 0
+    var lastTap: TimeInterval = 0
+    let buffer: UnsafeMutablePointer<UInt8>
+
+    init() {
+        self.buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 256)
+    }
+    
+    deinit {
+        buffer.deallocate()
+    }
+}
+
 final class MotionManager: ObservableObject {
     @Published var isMonitoring: Bool = false
     @Published var playInBackground: Bool = false
@@ -21,93 +44,54 @@ final class MotionManager: ObservableObject {
     }
     @Published var isShowingSettings: Bool = false
     
-    // Cambiato: ora passa (LatoLogico, TipoFisico)
     var onTapDetected: ((String, String) -> Void)?
 
     private var hidManager: IOHIDManager?
-    fileprivate var reportBuffer: UnsafeMutablePointer<UInt8>?
-    private var gravityX: Double = 0
-    private var gravityZ: Double = 0
-    private var prevLinearX: Double = 0
-    private var prevLinearZ: Double = 0
-    private let lockoutDuration: TimeInterval = 0.11
-    private var lastTap: TimeInterval = 0
-    private var isCollecting: Bool = false
-    private var collectionStartTime: TimeInterval = 0
-    private let collectionWindowDuration: TimeInterval = 0.015
-    private var peakJerkX: Double = 0
-    private var peakJerkZ: Double = 0
+    private var deviceStates: [IOHIDDevice: DeviceState] = [:]
     
-    /// Numero di report da saltare all'avvio per stabilizzare i filtri
-    private var isFirstReport: Bool = true
-
-    private var debugReportCounter = 0
-
-    private var reportBuffers: [UnsafeMutablePointer<UInt8>] = []
+    private let lockoutDuration: TimeInterval = 0.11
+    private let collectionWindowDuration: TimeInterval = 0.015
 
     static let shared = MotionManager()
 
     private init() {
         wakeSPUDrivers()
         hidManager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-        // 🔥 AUMENTATO IL BUFFER a 256 bytes per sicurezza
-        reportBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 256)
     }
 
     func startMonitoring() {
-    guard let manager = hidManager else { return }
-    
-    IOHIDManagerSetDeviceMatching(manager, [kIOHIDDeviceUsagePageKey: 0xFF00, kIOHIDDeviceUsageKey: 3] as CFDictionary)
-    let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-    
-    IOHIDManagerRegisterDeviceMatchingCallback(manager, { context, _, _, device in
-        let m = Unmanaged<MotionManager>.fromOpaque(context!).takeUnretainedValue()
+        guard let manager = hidManager else { return }
         
-        // 🔍 IDENTIFICAZIONE DEL SENSORE
-        let name = IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String ?? "Unknown"
+        IOHIDManagerSetDeviceMatching(manager, [kIOHIDDeviceUsagePageKey: 0xFF00, kIOHIDDeviceUsageKey: 3] as CFDictionary)
         
-        if name.lowercased().contains("lid") {
-            print("⏭️ [MotionManager] Scartato sensore LID (Schermo): \(name)")
-            return
-        }
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         
-        print("🎯 [MotionManager] Sensore BASE Agganciato: \(name)")
-        
-        // Da qui in poi procediamo solo per il sensore del telaio
-        var one: Int32 = 1
-        if let cfOne = CFNumberCreate(kCFAllocatorDefault, .sInt32Type, &one) {
-            IOHIDDeviceSetProperty(device, "SensorPropertyReportingState" as CFString, cfOne)
-            IOHIDDeviceSetProperty(device, "SensorPropertyPowerState" as CFString, cfOne)
-        }
-        
-        var interval: Int32 = 10000 
-        if let cfInterval = CFNumberCreate(kCFAllocatorDefault, .sInt32Type, &interval) {
-            IOHIDDeviceSetProperty(device, "ReportInterval" as CFString, cfInterval)
-        }
+        IOHIDManagerRegisterDeviceMatchingCallback(manager, { context, result, sender, device in
+            let m = Unmanaged<MotionManager>.fromOpaque(context!).takeUnretainedValue()
+            let state = DeviceState()
+            m.deviceStates[device] = state
+            
+            let name = IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String ?? "Unknown"
+            print("🎯 [MotionManager] Agganciato sensore: \(name)")
 
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 64)
-        m.reportBuffers.append(buffer)
+            IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
+            IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+            
+            // Passiamo sia il MotionManager che lo specifico DeviceState alla callback
+            let contextPtr = UnsafeMutableRawPointer(Unmanaged.passUnretained(state).toOpaque())
+            
+            IOHIDDeviceRegisterInputReportCallback(device, state.buffer, 256, { context, result, sender, type, reportId, report, length in
+                let state = Unmanaged<DeviceState>.fromOpaque(context!).takeUnretainedValue()
+                MotionManager.shared.process(report, for: state)
+            }, contextPtr)
+            
+        }, selfPtr)
         
-        IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
-        IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
-        
-        IOHIDDeviceRegisterInputReportCallback(device, buffer, 64, { context, _, _, _, _, report, _ in
-            Unmanaged<MotionManager>.fromOpaque(context!).takeUnretainedValue().process(report)
-        }, context)
-        
-    }, selfPtr)
-    
-    IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
-    IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
-}
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+    }
 
-    private func process(_ report: UnsafePointer<UInt8>) {
-        // 1. Verifichiamo che i dati arrivino e lo stato delle variabili chiave
-        debugReportCounter += 1
-        if debugReportCounter % 200 == 0 {
-            //print("📡 [MotionManager] Ricevuti 200 report. isMonitoring: \(isMonitoring), onTapDetected impostato: \(onTapDetected != nil)")
-        }
-
+    private func process(_ report: UnsafePointer<UInt8>, for state: DeviceState) {
         guard isMonitoring else { return }
 
         let xRaw = Int32(bitPattern: (UInt32(report[9])  << 24) | (UInt32(report[8])  << 16) | (UInt32(report[7])  << 8) | UInt32(report[6]))
@@ -115,98 +99,84 @@ final class MotionManager: ObservableObject {
         let x = Double(xRaw) / 65536.0
         let z = Double(zRaw) / 65536.0
 
-        if isFirstReport {
-            gravityX = x
-            gravityZ = z
-            prevLinearX = 0
-            prevLinearZ = 0
-            isFirstReport = false
+        if state.isFirstReport {
+            state.gravityX = x
+            state.gravityZ = z
+            state.isFirstReport = false
             return
         }
 
-        gravityX = (x * 0.1) + (gravityX * 0.9)
-        gravityZ = (z * 0.1) + (gravityZ * 0.9)
-        let linearX = x - gravityX
-        let linearZ = z - gravityZ
-        let jerkX = linearX - prevLinearX
-        let jerkZ = linearZ - prevLinearZ
-        prevLinearX = linearX
-        prevLinearZ = linearZ
+        state.gravityX = (x * 0.1) + (state.gravityX * 0.9)
+        state.gravityZ = (z * 0.1) + (state.gravityZ * 0.9)
+        
+        let linearX = x - state.gravityX
+        let linearZ = z - state.gravityZ
+        let jerkX = linearX - state.prevLinearX
+        let jerkZ = linearZ - state.prevLinearZ
+        state.prevLinearX = linearX
+        state.prevLinearZ = linearZ
 
         let threshold: Double
         switch sensitivityLevel {
-        case 1: threshold = 0.010
-        case 2: threshold = 0.008
-        case 3: threshold = 0.006
-        case 4: threshold = 0.004
-        case 5: threshold = 0.0025
+        case 1: threshold = 0.014  // Molto Sordo (Nuovo - richiede colpi decisi)
+        case 2: threshold = 0.012  // Sordo (Nuovo)
+        case 3: threshold = 0.010  // Medio-Sordo (Era il vecchio Livello 1)
+        case 4: threshold = 0.008  // Sensibile (Era il vecchio Livello 2)
+        case 5: threshold = 0.006  // Molto Sensibile (Era il vecchio Livello 3)
         default: threshold = 0.010
         }
+        
         let now = ProcessInfo.processInfo.systemUptime
 
-        if isCollecting {
-            if abs(jerkX) > abs(peakJerkX) { peakJerkX = jerkX }
-            if abs(jerkZ) > abs(peakJerkZ) { peakJerkZ = jerkZ }
-            if (now - collectionStartTime) >= collectionWindowDuration { fireTap(at: now) }
+        if state.isCollecting {
+            if abs(jerkX) > abs(state.peakJerkX) { state.peakJerkX = jerkX }
+            if abs(jerkZ) > abs(state.peakJerkZ) { state.peakJerkZ = jerkZ }
+            if (now - state.collectionStartTime) >= collectionWindowDuration { 
+                fireTap(for: state, at: now) 
+            }
             return
         }
 
-        guard (now - lastTap) > lockoutDuration else { return }
+        guard (now - state.lastTap) > lockoutDuration else { return }
         
-        // 2. Verifichiamo se il "Jerk" (l'impatto) supera la soglia
         if max(abs(jerkX), abs(jerkZ)) > threshold {
-            //print("💥 [MotionManager] IMPATTO RILEVATO! Avvio raccolta dati...")
-            isCollecting = true
-            collectionStartTime = now
-            peakJerkX = jerkX
-            peakJerkZ = jerkZ
+            state.isCollecting = true
+            state.collectionStartTime = now
+            state.peakJerkX = jerkX
+            state.peakJerkZ = jerkZ
         }
     }
 
-    private func fireTap(at now: TimeInterval) {
-        isCollecting = false
-        lastTap = now
-        let xMagnitude = abs(peakJerkX)
-        let zMagnitude = abs(peakJerkZ)
+    private func fireTap(for state: DeviceState, at now: TimeInterval) {
+        state.isCollecting = false
+        state.lastTap = now
         
-        // Algoritmo di classificazione del tocco
+        let xMagnitude = abs(state.peakJerkX)
+        let zMagnitude = abs(state.peakJerkZ)
         let isSideTap = xMagnitude > (zMagnitude * 0.35)
         
         let rawTapType = isSideTap ? "SIDE" : "TOP"
         let side = isSideTap ? "LEFT" : "RIGHT"
         
-        //print("🥁 [MotionManager] COLPO ELABORATO -> Tipo: \(rawTapType), Lato: \(side). Invio al motore audio...")
-        
         DispatchQueue.main.async { 
-            if self.onTapDetected == nil {
-                print("❌ [MotionManager] ERRORE GRAVE: onTapDetected è nil. Il suono non verrà mai riprodotto!")
-            }
             self.onTapDetected?(side, rawTapType) 
         }
     }
 
     private func wakeSPUDrivers() {
-        //print("⏰ [MotionManager] wakeSPUDrivers() avviato...")
         let matching = IOServiceMatching("AppleSPUHIDDriver")
         var iterator: io_iterator_t = 0
         IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator)
-        
         while true {
             let svc = IOIteratorNext(iterator)
             if svc == 0 { break }
-            
             var n: Int32 = 1
             let cfState = CFNumberCreate(nil, .sInt32Type, &n)
-            
-            // 🔥 TRUCCO DEL KERNEL: Iniettiamo l'intervallo direttamente nel servizio IOKit
-            var interval: Int32 = 10000 // 10ms
+            var interval: Int32 = 10000 
             let cfInterval = CFNumberCreate(nil, .sInt32Type, &interval)
-            
-            let r1 = IORegistryEntrySetCFProperty(svc, "SensorPropertyReportingState" as CFString, cfState!)
-            let r2 = IORegistryEntrySetCFProperty(svc, "SensorPropertyPowerState" as CFString, cfState!)
-            let r3 = IORegistryEntrySetCFProperty(svc, "ReportInterval" as CFString, cfInterval!)
-            
-            print("⚡️ [MotionManager] Wakeup -> Rep: \(r1), Pow: \(r2), Int: \(r3)")
+            IORegistryEntrySetCFProperty(svc, "SensorPropertyReportingState" as CFString, cfState!)
+            IORegistryEntrySetCFProperty(svc, "SensorPropertyPowerState" as CFString, cfState!)
+            IORegistryEntrySetCFProperty(svc, "ReportInterval" as CFString, cfInterval!)
             IOObjectRelease(svc)
         }
     }
