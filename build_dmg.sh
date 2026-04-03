@@ -5,7 +5,6 @@ set -e
 
 APP_NAME="MacBeat"
 BUILD_DIR=".build"
-RELEASE_DIR="${BUILD_DIR}/arm64-apple-macosx/release" # Potrebbe variare se l'arch è differente, ma per ora lo rileviamo
 APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
 CONTENTS_DIR="${APP_BUNDLE}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
@@ -72,10 +71,13 @@ else
     echo "Nessun logo trovato in $LOGO_PATH. L'icona dell'app non sarà impostata."
 fi
 
+echo "🔐 6.5 Firma dell'app (Ad-Hoc per Apple Silicon)..."
+codesign --force --deep --sign - "${APP_BUNDLE}"
+
 echo "💽 7. Creazione del DMG..."
 rm -f "${DMG_NAME}"
 
-# Creiamo una cartella temporanea per preparare il contenuto del DMG
+# Creiamo una cartella temporanea per preparare il contenuto del DMG usando esplicitamente BUILD_DIR
 DMG_SRC_DIR="${BUILD_DIR}/dmg_source"
 rm -rf "${DMG_SRC_DIR}"
 mkdir -p "${DMG_SRC_DIR}"
@@ -83,9 +85,30 @@ mkdir -p "${DMG_SRC_DIR}"
 # Sposta l'app nella cartella 
 cp -R "${APP_BUNDLE}" "${DMG_SRC_DIR}/"
 
+# Copia il launcher AppleScript (assicurati che il nome del file coincida)
+if [ -d "Avvia MacBeat.app" ]; then
+    cp -R "Avvia MacBeat.app" "${DMG_SRC_DIR}/"
+else
+    echo "⚠️ Attenzione: 'Avvia MacBeat.app' non trovato nella root del progetto!"
+fi
+
+# Crea il file Leggimi.txt con le istruzioni per i beta tester
+cat << 'EOF' > "${DMG_SRC_DIR}/Leggimi.txt"
+🥁 BENVENUTO NELLA BETA DI MACBEAT 🥁
+
+Per testare correttamente il rilevamento dei tocchi ad alta fedeltà, segui questi 3 passaggi:
+
+1. Trascina l'icona "MacBeat" nella cartella "Applications" qui a fianco. (Questo è obbligatorio).
+2. Copia l'icona "Avvia MacBeat" dove preferisci (ad esempio sul tuo Desktop o in Applicazioni).
+3. Usa SEMPRE e SOLO "Avvia MacBeat" per aprire l'app.
+
+⚠️ Nota sulla Sicurezza:
+Al primo avvio tramite il launcher ti verrà richiesta la password del Mac. Questo è un passaggio normale e temporaneo per questa versione Beta. MacBeat necessita di questi privilegi per poter accedere in tempo reale all'accelerometro integrato nel telaio.
+EOF
+
 # Aggiungi un symlink verso la cartella Applicazioni
 ln -s /Applications "${DMG_SRC_DIR}/Applications"
 
 hdiutil create -volname "${APP_NAME}" -srcfolder "${DMG_SRC_DIR}" -ov -format UDZO "${DMG_NAME}"
 
-echo "✅ Finito! L'app è stata pacchettizzata in ${DMG_NAME}"
+echo "✅ Finito! L'app e il launcher sono stati pacchettizzati in ${DMG_NAME}"

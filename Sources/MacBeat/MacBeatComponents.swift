@@ -230,7 +230,7 @@ struct FooterView: View {
     var body: some View {
         HStack {
             Spacer()
-            Button("Quit MacBeat") { NSApplication.shared.terminate(nil) }
+            Button("Quit MacBeat") { exit(0) }
                 .font(.system(size: 11, weight: .medium))
                 .keyboardShortcut("q", modifiers: .command)
                 .buttonStyle(.plain)
