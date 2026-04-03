@@ -14,9 +14,10 @@
 .com.apple.timemachine.donotpresent
 
 # =========================
-# Xcode
+# Xcode & Build Artifacts
 # =========================
 build/
+DerivedData/
 *.pbxuser
 !default.pbxuser
 *.mode1v3
@@ -28,7 +29,6 @@ build/
 xcuserdata/
 *.xccheckout
 *.moved-aside
-DerivedData/
 *.hmap
 *.ipa
 *.xcuserstate
@@ -44,19 +44,22 @@ Package.resolved
 *.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # =========================
-# CocoaPods (se lo usi in futuro)
+# Distribution & Releases (DMG/App Bundles)
 # =========================
-Pods/
-# Mantieni il Podfile.lock nel repository
-!Podfile.lock
+*.dmg
+*.app/
+*.pkg
+*.zip
 
 # =========================
-# Carthage (se lo usi in futuro)
+# CocoaPods / Carthage
 # =========================
+Pods/
+!Podfile.lock
 Carthage/Build/
 
 # =========================
-# Logs e Crash reports
+# Logs, Crash reports, Temp
 # =========================
 *.log
 *.crash
