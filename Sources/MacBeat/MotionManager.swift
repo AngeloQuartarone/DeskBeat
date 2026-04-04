@@ -118,12 +118,12 @@ final class MotionManager: ObservableObject {
 
         let threshold: Double
         switch sensitivityLevel {
-        case 1: threshold = 0.014  // Molto Sordo (Nuovo - richiede colpi decisi)
-        case 2: threshold = 0.012  // Sordo (Nuovo)
-        case 3: threshold = 0.010  // Medio-Sordo (Era il vecchio Livello 1)
-        case 4: threshold = 0.008  // Sensibile (Era il vecchio Livello 2)
-        case 5: threshold = 0.006  // Molto Sensibile (Era il vecchio Livello 3)
-        default: threshold = 0.010
+        case 1: threshold = 0.018  // Molto Sordo (Nuovo - richiede colpi decisi)
+        case 2: threshold = 0.016  // Sordo (Nuovo)
+        case 3: threshold = 0.014  // Medio-Sordo (Era il vecchio Livello 1)
+        case 4: threshold = 0.012  // Sensibile (Era il vecchio Livello 2)
+        case 5: threshold = 0.010  // Molto Sensibile (Era il vecchio Livello 3)
+        default: threshold = 0.014
         }
         
         let now = ProcessInfo.processInfo.systemUptime
