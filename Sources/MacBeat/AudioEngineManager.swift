@@ -207,11 +207,22 @@ final class AudioEngineManager: ObservableObject {
     }
     
     private func playNode(_ node: AVAudioPlayerNode, with buffer: AVAudioPCMBuffer) {
-        if !engine.isRunning { try? engine.start() }
+        if !engine.isRunning { 
+            try? engine.start() 
+            print("[MacBeat] 🔈 Motore Audio riavviato per riproduzione")
+        }
         // Non fermiamo il nodo bruscamente per permettere polifonia ed evitare click.
         // scheduleBuffer con .interrupts pulisce eventuali playback precedenti sullo stesso nodo in modo sicuro.
         node.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
         node.play()
+    }
+
+    /// Ferma il motore audio completamente per risparmiare batteria
+    func stopEngine() {
+        if engine.isRunning {
+            engine.stop()
+            print("[MacBeat] 💤 Motore Audio fermato (Battery Save)")
+        }
     }
 
     /// Ferma immediatamente tutti i campioni in riproduzione

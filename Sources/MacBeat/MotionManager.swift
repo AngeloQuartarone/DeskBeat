@@ -25,7 +25,15 @@ private class DeviceState {
 }
 
 final class MotionManager: ObservableObject {
-    @Published var isMonitoring: Bool = false
+    @Published var isMonitoring: Bool = false {
+        didSet {
+            if isMonitoring {
+                startMonitoring()
+            } else {
+                stopMonitoring()
+            }
+        }
+    }
     @Published var playInBackground: Bool = false
     @Published var isInverted: Bool = UserDefaults.standard.bool(forKey: "isInverted") {
         didSet { UserDefaults.standard.set(isInverted, forKey: "isInverted") }
@@ -48,6 +56,7 @@ final class MotionManager: ObservableObject {
 
     private var hidManager: IOHIDManager?
     private var deviceStates: [IOHIDDevice: DeviceState] = [:]
+    private var isHardwareActive: Bool = false
     
     private let lockoutDuration: TimeInterval = 0.11
     private let collectionWindowDuration: TimeInterval = 0.015
@@ -55,11 +64,8 @@ final class MotionManager: ObservableObject {
     static let shared = MotionManager()
 
     private init() {
-        wakeSPUDrivers()
         hidManager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-    }
-
-    func startMonitoring() {
+        
         guard let manager = hidManager else { return }
         
         IOHIDManagerSetDeviceMatching(manager, [kIOHIDDeviceUsagePageKey: 0xFF00, kIOHIDDeviceUsageKey: 3] as CFDictionary)
@@ -77,7 +83,6 @@ final class MotionManager: ObservableObject {
             IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
             IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
             
-            // Passiamo sia il MotionManager che lo specifico DeviceState alla callback
             let contextPtr = UnsafeMutableRawPointer(Unmanaged.passUnretained(state).toOpaque())
             
             IOHIDDeviceRegisterInputReportCallback(device, state.buffer, 256, { context, result, sender, type, reportId, report, length in
@@ -89,11 +94,28 @@ final class MotionManager: ObservableObject {
         
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
         IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+        
+        // Inizialmente mettiamo i driver in standby per risparmiare batteria
+        sleepSPUDrivers()
+    }
+
+    func startMonitoring() {
+        if isHardwareActive { return }
+        isHardwareActive = true
+        wakeSPUDrivers()
+        print("🚀 [MotionManager] Monitoraggio riattivato (Hardware Wake)")
+    }
+
+    func stopMonitoring() {
+        if !isHardwareActive { return }
+        isHardwareActive = false
+        sleepSPUDrivers()
+        print("💤 [MotionManager] Monitoraggio sospeso (Hardware Sleep)")
     }
 
     private func process(_ report: UnsafePointer<UInt8>, for state: DeviceState) {
-        guard isMonitoring else { return }
-
+        guard isHardwareActive else { return }
+        
         let xRaw = Int32(bitPattern: (UInt32(report[9])  << 24) | (UInt32(report[8])  << 16) | (UInt32(report[7])  << 8) | UInt32(report[6]))
         let zRaw = Int32(bitPattern: (UInt32(report[17]) << 24) | (UInt32(report[16]) << 16) | (UInt32(report[15]) << 8) | UInt32(report[14]))
         let x = Double(xRaw) / 65536.0
@@ -118,11 +140,11 @@ final class MotionManager: ObservableObject {
 
         let threshold: Double
         switch sensitivityLevel {
-        case 1: threshold = 0.018  // Molto Sordo (Nuovo - richiede colpi decisi)
-        case 2: threshold = 0.016  // Sordo (Nuovo)
-        case 3: threshold = 0.014  // Medio-Sordo (Era il vecchio Livello 1)
-        case 4: threshold = 0.012  // Sensibile (Era il vecchio Livello 2)
-        case 5: threshold = 0.010  // Molto Sensibile (Era il vecchio Livello 3)
+        case 1: threshold = 0.018  // Molto Sordo
+        case 2: threshold = 0.016  // Sordo
+        case 3: threshold = 0.014  // Medio-Sordo
+        case 4: threshold = 0.012  // Sensibile
+        case 5: threshold = 0.010  // Molto Sensibile
         default: threshold = 0.014
         }
         
@@ -179,5 +201,25 @@ final class MotionManager: ObservableObject {
             IORegistryEntrySetCFProperty(svc, "ReportInterval" as CFString, cfInterval!)
             IOObjectRelease(svc)
         }
+        print("⚡ [MotionManager] Sensori Apple SPU risvegliati (100Hz)")
+    }
+
+    private func sleepSPUDrivers() {
+        let matching = IOServiceMatching("AppleSPUHIDDriver")
+        var iterator: io_iterator_t = 0
+        IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator)
+        while true {
+            let svc = IOIteratorNext(iterator)
+            if svc == 0 { break }
+            var n: Int32 = 0 // Spento
+            let cfState = CFNumberCreate(nil, .sInt32Type, &n)
+            var interval: Int32 = 1000000 // Risparmio massimo (1 report al secondo se attivo)
+            let cfInterval = CFNumberCreate(nil, .sInt32Type, &interval)
+            IORegistryEntrySetCFProperty(svc, "SensorPropertyReportingState" as CFString, cfState!)
+            IORegistryEntrySetCFProperty(svc, "SensorPropertyPowerState" as CFString, cfState!)
+            IORegistryEntrySetCFProperty(svc, "ReportInterval" as CFString, cfInterval!)
+            IOObjectRelease(svc)
+        }
+        print("🛌 [MotionManager] Sensori Apple SPU messi a nanna (1Hz/Off)")
     }
 }
