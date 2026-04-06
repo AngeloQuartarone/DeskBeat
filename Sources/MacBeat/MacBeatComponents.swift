@@ -222,6 +222,128 @@ struct MacMenuRow<T: Hashable>: View {
     }
 }
 
+// MARK: - Step Sequencer Components
+
+struct StepSequencerRowView: View {
+    let pad: InstrumentPad
+    let steps: [Bool]
+    let currentStep: Int
+    let onStepToggle: (Int) -> Void
+    let onPadTap: () -> Void
+    let onMuteToggle: () -> Void
+    let onClear: () -> Void
+    let isSelected: Bool
+    let isMuted: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            // New Controls: Mute & Clear
+            HStack(spacing: 4) {
+                Button(action: onMuteToggle) {
+                    Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(isMuted ? .red : .secondary)
+                        .frame(width: 20, height: 20)
+                        .background(isMuted ? .red.opacity(0.15) : Color.primary.opacity(0.05))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Mute/Unmute")
+
+                Button(action: onClear) {
+                    Image(systemName: "eraser.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                        .background(Color.primary.opacity(0.05))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Clear Line")
+            }
+            .padding(.trailing, 2)
+
+            // Instrument Label / Mini Pad
+            Button(action: onPadTap) {
+                HStack(spacing: 6) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(pad.color.opacity(isSelected ? 0.3 : 0.1))
+                            .frame(width: 24, height: 24)
+                            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(pad.color.opacity(0.3), lineWidth: 0.5))
+                        
+                        Text(pad.letter)
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(pad.color)
+                            .opacity(isMuted ? 0.4 : 1.0)
+                    }
+                    
+                    Text(pad.name)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(isSelected ? .primary : .secondary)
+                        .frame(width: 50, alignment: .leading)
+                        .lineLimit(1)
+                        .opacity(isMuted ? 0.4 : 1.0)
+                }
+            }
+            .buttonStyle(.plain)
+
+            // Step Grid
+            HStack(spacing: 3) {
+                ForEach(0..<steps.count, id: \.self) { index in
+                    StepButton(
+                        isOn: steps[index],
+                        isCurrent: index == currentStep,
+                        color: pad.color,
+                        isMajor: index % 4 == 0,
+                        onToggle: { onStepToggle(index) }
+                    )
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+struct StepButton: View {
+    let isOn: Bool
+    let isCurrent: Bool
+    let color: Color
+    let isMajor: Bool // Every 4 steps
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(fillColor)
+                    .frame(height: 18)
+                    .frame(maxWidth: .infinity)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 2)
+                            .strokeBorder(isCurrent ? Color.white.opacity(0.8) : Color.clear, lineWidth: 1.5)
+                    )
+                
+                if isCurrent {
+                    // Glow effect for playhead
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.white.opacity(0.3))
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var fillColor: Color {
+        if isOn {
+            return color.opacity(isCurrent ? 1.0 : 0.8)
+        } else {
+            // Fondo grigio/scuro per step spenti, leggermente diverso ogni 4 per orientamento
+            return isMajor ? Color.primary.opacity(0.12) : Color.primary.opacity(0.06)
+        }
+    }
+}
+
 // MARK: - Footer
 
 struct FooterView: View {

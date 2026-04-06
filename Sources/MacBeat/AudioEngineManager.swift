@@ -15,10 +15,21 @@ final class AudioEngineManager: ObservableObject {
         description.componentFlagsMask = 0
         return AVAudioUnitEffect(audioComponentDescription: description)
     }()
+
+    private let compressor: AVAudioUnitEffect = {
+        var description = AudioComponentDescription()
+        description.componentType = kAudioUnitType_Effect
+        description.componentSubType = kAudioUnitSubType_DynamicsProcessor
+        description.componentManufacturer = kAudioUnitManufacturer_Apple
+        description.componentFlags = 0
+        description.componentFlagsMask = 0
+        return AVAudioUnitEffect(audioComponentDescription: description)
+    }()
+
+    private let instrumentMixer = AVAudioMixerNode()
     
-    // Player nodes per il trigger live (Dual-Voice Polyphony per evitare click/pop)
+    // Player nodes per il trigger live (8-Voice Polyphony per evitare click/pop)
     private var livePlayerNodes: [String: [AVAudioPlayerNode]] = [:]
-    private var nodePointers: [String: Int] = [:] // Traccia quale voce usare (0 o 1)
     private var audioBuffers: [String: AVAudioPCMBuffer] = [:]
     
     /// Directory per i suoni caricati dall'utente
@@ -31,15 +42,36 @@ final class AudioEngineManager: ObservableObject {
         
         try? fileManager.createDirectory(at: userSoundsDir, withIntermediateDirectories: true)
         
-        // Configura il limitatore sull'uscita master per prevenire il clipping digitale (distorsione)
-        // Nota: AVAudioUnitEffect (PeakLimiter) non ha una proprietà .threshold diretta in Swift,
-        // ma funge da brickwall limiter predefinito sullo 0dB.
+        // Configura il compressore via AudioUnit parameters
+        if let au = compressor.auAudioUnit.parameterTree {
+            // Parametri tipici per un compressore "soft"
+            let thresholdParam = au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_Threshold))
+            let headRoomParam = au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_HeadRoom))
+            let expansionRatioParam = au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_ExpansionRatio))
+            let attackTimeParam = au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_AttackTime))
+            let releaseTimeParam = au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_ReleaseTime))
+            let masterGainParam = au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_OverallGain))
+            
+            thresholdParam?.value = -12.0
+            headRoomParam?.value = 2.0
+            expansionRatioParam?.value = 2.0
+            attackTimeParam?.value = 0.002
+            releaseTimeParam?.value = 0.05
+            masterGainParam?.value = 0.0
+        }
+        
+        // Configurazione del Sub-Mixer: riceve tutti gli strumenti e li scala prima degli effetti
+        instrumentMixer.outputVolume = 0.25 // Headroom strutturale (V3: 0.25 = somma di 4 full-power kick)
+        
+        engine.attach(instrumentMixer)
+        engine.attach(compressor)
         engine.attach(limiter)
         
-        // Re-routing: Mixer -> Limiter -> Output
+        // Re-routing: InstrumentMixer -> Compressor -> Limiter -> Output
         let format = engine.mainMixerNode.outputFormat(forBus: 0)
-        engine.connect(engine.mainMixerNode, to: limiter, format: format)
-        engine.connect(limiter, to: engine.outputNode, format: format)
+        engine.connect(instrumentMixer, to: compressor, format: format)
+        engine.connect(compressor, to: limiter, format: format)
+        engine.connect(limiter, to: engine.mainMixerNode, format: format)
 
         loadSamples()
         refreshUserSounds()
@@ -162,16 +194,15 @@ final class AudioEngineManager: ObservableObject {
                 try file.read(into: buffer)
                 
                 var nodes: [AVAudioPlayerNode] = []
-                for _ in 0..<2 {
+                for _ in 0..<8 { // Aumentata polifonia a 8 voci per evitare click su restart
                     let liveNode = AVAudioPlayerNode()
-                    liveNode.volume = 0.85 // Headroom per la polifonia (evita di colpire troppo duro il limiter)
+                    liveNode.volume = 0.80 // Volume interno alto, l'headroom è gestita dal sub-mixer (V3)
                     engine.attach(liveNode)
-                    engine.connect(liveNode, to: engine.mainMixerNode, format: file.processingFormat)
+                    engine.connect(liveNode, to: instrumentMixer, format: file.processingFormat)
                     nodes.append(liveNode)
                 }
                 
                 livePlayerNodes[name] = nodes
-                nodePointers[name] = 0
                 audioBuffers[name] = buffer
                 
                 print("[MacBeat] ✅ Caricato: \(name).\(url.pathExtension)")
@@ -181,22 +212,49 @@ final class AudioEngineManager: ObservableObject {
         }
     }
 
-    /// Suona un campione in modalità live (Dual-Voice Polyphony per evitare click)
+    /// Suona un campione cercando una voce libera (8-Voice Polyphony)
     func playSample(named name: String, source: String? = nil) {
         guard let nodes = livePlayerNodes[name], let buffer = audioBuffers[name] else { 
             setupNodeAndLoadBuffer(named: name)
-            if let newNodes = livePlayerNodes[name], let newBuffer = audioBuffers[name] {
-                let pointer = nodePointers[name] ?? 0
-                playNode(newNodes[pointer], with: newBuffer)
-                nodePointers[name] = (pointer + 1) % 2
-            }
+            // Se non caricato ora, usciamo
+            guard let retryNodes = livePlayerNodes[name], let retryBuffer = audioBuffers[name] else { return }
+            selectAndPlay(nodes: retryNodes, buffer: retryBuffer)
+            triggerVisualEffect(named: name, source: source)
             return 
         }
         
-        let pointer = nodePointers[name] ?? 0
-        playNode(nodes[pointer], with: buffer)
-        nodePointers[name] = (pointer + 1) % 2
+        let isKick = name.lowercased().contains("kick")
+        selectAndPlay(nodes: nodes, buffer: buffer, isKick: isKick)
+        triggerVisualEffect(named: name, source: source)
+    }
 
+    private func selectAndPlay(nodes: [AVAudioPlayerNode], buffer: AVAudioPCMBuffer, isKick: Bool = false) {
+        if !engine.isRunning { try? engine.start() }
+
+        // Trova il primo nodo non in riproduzione
+        let idleNode = nodes.first { !$0.isPlaying }
+        
+        if let node = idleNode {
+            // Se è un Kick e ci sono troppe voci attive, limitiamo a 2 per evitare clip di frequenze basse
+            if isKick {
+                let playingNodes = nodes.filter { $0.isPlaying }
+                if playingNodes.count >= 2 {
+                    // Ferma la più vecchia
+                    playingNodes[0].stop()
+                }
+            }
+            node.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
+            node.play()
+        } else {
+            // Se tutti occupati, usiamo il primo e lo interrompiamo
+            let busyNode = nodes[0]
+            busyNode.stop()
+            busyNode.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
+            busyNode.play()
+        }
+    }
+
+    private func triggerVisualEffect(named name: String, source: String?) {
         DispatchQueue.main.async {
             NotificationCenter.default.post(
                 name: NSNotification.Name("MacBeatTriggeredEffect"),
@@ -207,12 +265,8 @@ final class AudioEngineManager: ObservableObject {
     }
     
     private func playNode(_ node: AVAudioPlayerNode, with buffer: AVAudioPCMBuffer) {
-        if !engine.isRunning { 
-            try? engine.start() 
-            print("[MacBeat] 🔈 Motore Audio riavviato per riproduzione")
-        }
-        // Non fermiamo il nodo bruscamente per permettere polifonia ed evitare click.
-        // scheduleBuffer con .interrupts pulisce eventuali playback precedenti sullo stesso nodo in modo sicuro.
+        // Metodo mantenuto per retrocompatibilità interna se necessario, ma selectAndPlay è prioritario ora
+        if !engine.isRunning { try? engine.start() }
         node.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
         node.play()
     }
@@ -289,7 +343,6 @@ final class AudioEngineManager: ObservableObject {
                 engine.detach(node)
             }
             livePlayerNodes.removeValue(forKey: name)
-            nodePointers.removeValue(forKey: name)
             audioBuffers.removeValue(forKey: name)
             print("[MacBeat] 🗑️ Rimosso: \(name)")
         }

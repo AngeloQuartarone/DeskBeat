@@ -7,9 +7,9 @@ struct LooperModeView: View {
     @State private var pulseOpacity: Double = 1.0
 
     var body: some View {
-        VStack(spacing: 12) { // Ridotto da 14 a 12
+        VStack(spacing: 12) {
 
-            // Status chip
+            // Status chip & BPM information
             HStack(spacing: 8) {
                 Circle()
                     .fill(statusColor)
@@ -28,76 +28,89 @@ struct LooperModeView: View {
 
                 Spacer()
 
-                // Usiamo un Group o semplicemente le condition
-                if looper.state == .looping {
-                    Text("\(Int(looper.calculatedBPM)) BPM")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.green)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.green.opacity(0.15))
-                        .clipShape(Capsule())
+                if looper.calculatedBPM > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "metronome.fill")
+                            .font(.system(size: 10))
+                        Text("\(Int(looper.calculatedBPM)) BPM")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(.green.opacity(0.1))
+                    .clipShape(Capsule())
                 } else if looper.state == .idle {
-                    Text("Start tapping a beat")
+                    Text("Physical Tap to Start")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 12)
-            .frame(height: 36) // <-- ECCO IL FIX: Blocchiamo l'altezza in modo rigido
+            .frame(height: 36)
             .background(Color.primary.opacity(0.03))
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5))
 
-            // Instrument pad grid
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) { // Spaziatura verticale ridotta da 10 a 6
+            // Step Sequencer Track List
+            VStack(spacing: 6) {
                 ForEach(looper.availablePads) { pad in
-                    VStack(spacing: 4) { // Spazio tra pad e bottone clear ridotto da 6 a 4
-                        LooperPadView(
-                            letter:     pad.letter,
-                            name:       pad.name,
-                            accent:     pad.color,
-                            isSelected: looper.currentInstrument == pad.id,
-                            isFlashing: visualEffects.contains { $0.instrument == pad.id },
-                            onTap:      { looper.currentInstrument = pad.id }
-                        )
-                        .frame(height: 60) // Altezza pad compattata (era 65)
-
-                        if looper.recordedInstrumentsTracker.contains(pad.id) && looper.state == .looping {
-                            Button {
-                                looper.clearInstrument(pad.id)
-                            } label: {
-                                Text("clear")
-                                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                                    .textCase(.uppercase)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 16) // Altezza tasto compattata da 18 a 16
-                                    .background(Color.primary.opacity(0.05))
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            Color.clear.frame(height: 16) // Coerente con il tasto clear
-                        }
-                    }
+                    StepSequencerRowView(
+                        pad: pad,
+                        steps: looper.grid[pad.id] ?? Array(repeating: false, count: looper.totalSteps),
+                        currentStep: looper.currentStep,
+                        onStepToggle: { stepIdx in
+                            looper.toggleStep(instrument: pad.id, stepIndex: stepIdx)
+                        },
+                        onPadTap: {
+                            looper.currentInstrument = pad.id
+                            // Feedback audio immediato
+                            AudioEngineManager.shared.playSample(named: pad.id)
+                        },
+                        onMuteToggle: {
+                            looper.toggleMute(instrument: pad.id)
+                        },
+                        onClear: {
+                            looper.clearInstrument(pad.id)
+                        },
+                        isSelected: looper.currentInstrument == pad.id || visualEffects.contains { $0.instrument == pad.id },
+                        isMuted: looper.mutedInstruments.contains(pad.id)
+                    )
                 }
             }
-            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: looper.state)
+            .padding(.vertical, 4)
 
-            // Reset all
-            Button { looper.reset() } label: {
-                Label("Clear all", systemImage: "trash.fill")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+            // Bottom Actions
+            HStack(spacing: 8) {
+                // Clear all
+                Button(action: { looper.reset() }) {
+                    Label("Clear", systemImage: "trash.fill")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .frame(maxWidth: .infinity).frame(height: 30)
+                        .foregroundStyle(.red.opacity(0.9))
+                        .background(.red.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.red.opacity(0.2), lineWidth: 0.5))
+
+                // Quantization toggle
+                Button(action: { looper.isQuantized.toggle() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: looper.isQuantized ? "grid" : "clock")
+                        Text(looper.isQuantized ? "Quantized" : "Free")
+                    }
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .frame(maxWidth: .infinity).frame(height: 30)
-                    .foregroundStyle(.red.opacity(0.9))
-                    .background(.red.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.red.opacity(0.2), lineWidth: 0.5))
+                    .foregroundStyle(looper.isQuantized ? .blue : .secondary)
+                    .background(looper.isQuantized ? Color.blue.opacity(0.1) : Color.primary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(looper.isQuantized ? .blue.opacity(0.2) : .primary.opacity(0.1), lineWidth: 0.5))
             }
-            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
     }
 
     private var statusColor: Color {

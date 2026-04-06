@@ -14,6 +14,20 @@ enum LooperState: String {
     case looping = "Looping"
 }
 
+enum StepResolution: Int, CaseIterable {
+    case eighth = 8
+    case sixteenth = 16
+    case thirtySecond = 32
+    
+    var stepsPerBeat: Int {
+        switch self {
+        case .eighth: return 2
+        case .sixteenth: return 4
+        case .thirtySecond: return 8
+        }
+    }
+}
+
 final class LooperManager: ObservableObject {
     static let shared = LooperManager()
 
@@ -25,25 +39,34 @@ final class LooperManager: ObservableObject {
     @Published var isQuantized: Bool = (UserDefaults.standard.object(forKey: "isQuantized") as? Bool) ?? true {
         didSet { UserDefaults.standard.set(isQuantized, forKey: "isQuantized") }
     }
+    @Published var mutedInstruments: Set<String> = []
 
     @Published var state: LooperState = .idle
     @Published var calculatedBPM: Double = 0
-
-    @Published var recordedInstrumentsTracker: Set<String> = []
+    @Published var currentStep: Int = -1
     
     @Published var availablePads: [InstrumentPad] = []
+    
+    // Griglia del sequencer: InstrumentID -> Array di Bool (lunghezza = totalSteps)
+    @Published var grid: [String: [Bool]] = [:]
+    
+    // Configurazione Sequencer
+    var resolution: StepResolution = .sixteenth
+    var totalSteps: Int = 16 // Per ora fisso a 1 bar (16 step @ 1/16)
 
     private var rawEvents: [(name: String, time: TimeInterval)] = []
-    private var activeLoopEvents: [(offset: TimeInterval, instrument: String)] = []
-
+    
     private var loopStartTime: TimeInterval?
     private var loopDuration: TimeInterval = 0
-    private var beatDuration: TimeInterval = 0 // Servirà per la griglia di quantizzazione
+    private var beatDuration: TimeInterval = 0
+    private var stepDuration: TimeInterval = 0
 
     private var silenceTimer: Timer?
     private let silenceThreshold: TimeInterval = 1.5
     private var playbackTimer: Timer?
-    private var lastPlayedOffset: TimeInterval = -1.0
+    
+    // Per gestire il trigger dei suoni in modo preciso
+    private var lastTriggeredStep: Int = -1
 
     private init() {
         setupDefaultPads()
@@ -53,11 +76,8 @@ final class LooperManager: ObservableObject {
         let availableBase = AudioEngineManager.shared.getAvailableSoundFiles(in: "Base")
         let baseSet = ["bass", "clap", "hihat", "kick", "snare"]
         
-        // Filtra i suoni della cartella Sounds basandosi sull'elenco richiesto
         let looperSounds = availableBase.filter { baseSet.contains($0) }
         let userSounds = AudioEngineManager.shared.getUserAddedSounds()
-        
-        // Uniamo i due set (suoni base richiesti + suoni aggiunti dall'utente)
         let allSounds = looperSounds + userSounds
         
         self.availablePads = allSounds.enumerated().map { index, filename in
@@ -68,11 +88,20 @@ final class LooperManager: ObservableObject {
             return InstrumentPad(id: id, name: name, letter: letter, color: color)
         }
         
-        // Imposta il primo come default se presente e se quello attuale non è valido
+        // Inizializza la griglia per tutti gli strumenti disponibili
+        resetGrid()
+        
         if !availablePads.contains(where: { $0.id == currentInstrument }) {
             if let first = availablePads.first {
                 currentInstrument = first.id
             }
+        }
+    }
+    
+    func resetGrid() {
+        grid.removeAll()
+        for pad in availablePads {
+            grid[pad.id] = Array(repeating: false, count: totalSteps)
         }
     }
     
@@ -84,31 +113,52 @@ final class LooperManager: ObservableObject {
         return palette[index % palette.count]
     }
 
-    // MARK: - Clear instrument from loop
+    // MARK: - Sequencer Actions
 
-    /// Removes all events for this instrument from the active loop.
-    /// The pad goes back to "empty" state — next tap will overdub it fresh.
-    func clearInstrument(_ instrument: String) {
-    activeLoopEvents.removeAll { $0.instrument == instrument }
-    recordedInstrumentsTracker.remove(instrument)
-    
-    // Ferma immediatamente la riproduzione del campione per questo strumento specifico
-    AudioEngineManager.shared.stopSample(named: instrument)
-
-    // Se non ci sono più eventi nel loop, resetta tutto allo stato "idle"
-    if activeLoopEvents.isEmpty {
-        reset()
+    func toggleStep(instrument: String, stepIndex: Int) {
+        guard stepIndex >= 0 && stepIndex < totalSteps else { return }
+        if grid[instrument] == nil {
+            grid[instrument] = Array(repeating: false, count: totalSteps)
+        }
+        grid[instrument]?[stepIndex].toggle()
+        
+        // Se l'utente attiva manualmente, passiamo a uno stato di riproduzione fittizio se eravamo in idle
+        if state == .idle {
+            // Se non c'è un BPM, ne usiamo uno di default (120) per permettere il manual edit
+            if calculatedBPM == 0 {
+                setupManualSequencer(bpm: 120)
+            }
+        }
     }
-}
+
+    func clearInstrument(_ instrument: String) {
+        grid[instrument] = Array(repeating: false, count: totalSteps)
+        AudioEngineManager.shared.stopSample(named: instrument)
+        
+        // Se non ci sono più note attive, potremmo resettare ma solitamente si preferisce mantenere il BPM
+        let hasAnyNote = grid.values.contains { $0.contains(true) }
+        if !hasAnyNote && state == .looping {
+            // Restiamo in looping ma col sequencer vuoto
+        }
+    }
+
+    func toggleMute(instrument: String) {
+        if mutedInstruments.contains(instrument) {
+            mutedInstruments.remove(instrument)
+        } else {
+            mutedInstruments.insert(instrument)
+            AudioEngineManager.shared.stopSample(named: instrument)
+        }
+    }
 
     // MARK: - Tap processing
 
     func processTap(rawTap: String) {
         guard rawTap == targetInput else { return }
 
+        // Play feedback
         AudioEngineManager.shared.playSample(named: currentInstrument)
 
-        recordedInstrumentsTracker.insert(currentInstrument)
         let now = ProcessInfo.processInfo.systemUptime
 
         switch state {
@@ -127,21 +177,17 @@ final class LooperManager: ObservableObject {
         case .looping:
             guard let startTime = loopStartTime else { return }
             let elapsed = now - startTime
-            let rawOffset = elapsed.truncatingRemainder(dividingBy: loopDuration)
             
-            // Applica quantizzazione agli overdub se attiva
-            let finalOffset = isQuantized ? quantize(rawOffset) : rawOffset
-            activeLoopEvents.append((offset: finalOffset, instrument: currentInstrument))
+            // Quantizzazione immediata allo step più vicino
+            let rawOffset = elapsed.truncatingRemainder(dividingBy: loopDuration)
+            let stepIdx = Int(round(rawOffset / stepDuration)) % totalSteps
+            
+            // Accendiamo lo step
+            if grid[currentInstrument] == nil {
+                grid[currentInstrument] = Array(repeating: false, count: totalSteps)
+            }
+            grid[currentInstrument]?[stepIdx] = true
         }
-    }
-
-    private func quantize(_ offset: TimeInterval) -> TimeInterval {
-        // Griglia: 1/16th notes (4 per battito)
-        let gridSize = beatDuration / 4.0
-        let quantized = round(offset / gridSize) * gridSize
-        
-        // Evita che sfori la durata del loop (raro ma possibile per arrotondamento)
-        return quantized >= loopDuration ? 0 : quantized
     }
 
     // MARK: - Recording finalization
@@ -157,6 +203,7 @@ final class LooperManager: ObservableObject {
         guard state == .recording else { return }
         guard rawEvents.count > 1 else { reset(); return }
 
+        // Stima del BPM basata sui primi tap
         var intervals: [TimeInterval] = []
         for i in 1..<rawEvents.count {
             intervals.append(rawEvents[i].time - rawEvents[i-1].time)
@@ -167,69 +214,89 @@ final class LooperManager: ObservableObject {
         while roughBeat > 1.0  { roughBeat /= 2 }
 
         let totalTappedTime = rawEvents.last!.time
-        let beatsBetweenFirstAndLast = max(1.0, round(totalTappedTime / roughBeat))
-        let preciseBeat = totalTappedTime / beatsBetweenFirstAndLast
+        let beatsInBar = 4.0 // Assumiamo 4/4
+        let estimatedBeats = max(1.0, round(totalTappedTime / roughBeat))
         
+        // Forziamo il loop duration a essere esattamente 1 battuta (4 beats) per ora
+        // Ricalcoliamo il beatDuration basandoci sulla media per avere un BPM stabile
+        let preciseBeat = totalTappedTime / estimatedBeats
         self.beatDuration = preciseBeat
         self.calculatedBPM = 60.0 / preciseBeat
+        
+        // Loop duration fisso a 4 beat (1 bar)
+        self.loopDuration = 4.0 * preciseBeat
+        self.stepDuration = loopDuration / Double(totalSteps)
 
-        let totalBeats = beatsBetweenFirstAndLast + 1
-        let barsCount = max(1, Int(round(totalBeats / 4.0)))
-        self.loopDuration = Double(barsCount) * 4.0 * preciseBeat
-
-        self.activeLoopEvents.removeAll()
+        // Riempiamo la griglia dai tap registrati
+        resetGrid()
         for event in rawEvents {
-            var exactOffset = event.time
-            if exactOffset >= loopDuration {
-                exactOffset = exactOffset.truncatingRemainder(dividingBy: loopDuration)
-            }
-            
-            // Applica quantizzazione se attiva
-            let finalOffset = isQuantized ? quantize(exactOffset) : exactOffset
-            self.activeLoopEvents.append((offset: finalOffset, instrument: event.name))
+            let wrappedTime = event.time.truncatingRemainder(dividingBy: loopDuration)
+            let stepIdx = Int(round(wrappedTime / stepDuration)) % totalSteps
+            grid[event.name]?[stepIdx] = true
         }
 
         self.loopStartTime = ProcessInfo.processInfo.systemUptime
         self.state = .looping
         startPlayback()
     }
-
-    // MARK: - Playback
     
-    /// Avvia il playback del loop dal principio
+    private func setupManualSequencer(bpm: Double) {
+        self.calculatedBPM = bpm
+        self.beatDuration = 60.0 / bpm
+        self.loopDuration = 4.0 * beatDuration
+        self.stepDuration = loopDuration / Double(totalSteps)
+        self.loopStartTime = ProcessInfo.processInfo.systemUptime
+        self.state = .looping
+        startPlayback()
+    }
+
+    // MARK: - Playback Loop
+    
     func startPlayback() {
         playbackTimer?.invalidate()
-        self.lastPlayedOffset = -0.001
+        lastTriggeredStep = -1
 
-        let timer = Timer(timeInterval: 0.01, repeats: true) { [weak self] _ in
+        // Timer ad alta frequenza per scansionare la griglia
+        let timer = Timer(timeInterval: 0.005, repeats: true) { [weak self] _ in
             guard let self = self, self.state == .looping else { return }
 
             let currentTime = ProcessInfo.processInfo.systemUptime
             guard let startTime = self.loopStartTime else { return }
-            let currentOffset = (currentTime - startTime).truncatingRemainder(dividingBy: self.loopDuration)
+            
+            let elapsed = currentTime - startTime
+            let currentOffset = elapsed.truncatingRemainder(dividingBy: self.loopDuration)
+            let currentStepIdx = Int(floor(currentOffset / self.stepDuration)) % self.totalSteps
 
-            if currentOffset < self.lastPlayedOffset {
-                self.lastPlayedOffset = -0.001
+            // Aggiorna la playhead per la View
+            if self.currentStep != currentStepIdx {
+                DispatchQueue.main.async {
+                    self.currentStep = currentStepIdx
+                }
             }
 
-            for event in self.activeLoopEvents {
-                guard event.offset > self.lastPlayedOffset && event.offset <= currentOffset else { continue }
-
-                AudioEngineManager.shared.playSample(named: event.instrument)
-
+            // Trigger dei suoni quando scatta il nuovo step
+            if currentStepIdx != self.lastTriggeredStep {
+                self.triggerStep(currentStepIdx)
+                self.lastTriggeredStep = currentStepIdx
             }
-
-            self.lastPlayedOffset = currentOffset
         }
 
         RunLoop.main.add(timer, forMode: .common)
         self.playbackTimer = timer
     }
     
-    /// Ferma il playback del loop
+    private func triggerStep(_ stepIndex: Int) {
+        for (instrumentID, steps) in grid {
+            if steps[stepIndex] && !mutedInstruments.contains(instrumentID) {
+                AudioEngineManager.shared.playSample(named: instrumentID)
+            }
+        }
+    }
+    
     func stopPlayback() {
         playbackTimer?.invalidate()
         playbackTimer = nil
+        currentStep = -1
     }
 
     // MARK: - Reset
@@ -238,13 +305,11 @@ final class LooperManager: ObservableObject {
         silenceTimer?.invalidate()
         playbackTimer?.invalidate()
         rawEvents.removeAll()
-        activeLoopEvents.removeAll()
+        resetGrid()
         loopStartTime = nil
         calculatedBPM = 0
         state = .idle
-        recordedInstrumentsTracker.removeAll()
-        
-        // Ferma immediatamente tutti i suoni in riproduzione
+        currentStep = -1
         AudioEngineManager.shared.stopAllSamples()
     }
 }

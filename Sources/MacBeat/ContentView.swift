@@ -111,7 +111,7 @@ struct ContentView: View {
 
             FooterView(motionManager: motionManager)
         }
-        .frame(width: 290) // Leggermente allargato per far respirare la UI
+        .frame(width: 360) // Leggermente allargato per far respirare la UI
         .background(.regularMaterial)
         .onAppear {
             motionManager.isMonitoring = true
