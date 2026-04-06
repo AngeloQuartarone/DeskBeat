@@ -30,6 +30,7 @@ final class AudioEngineManager: ObservableObject {
     
     // Player nodes per il trigger live (8-Voice Polyphony per evitare click/pop)
     private var livePlayerNodes: [String: [AVAudioPlayerNode]] = [:]
+    private var samplers: [String: AVAudioUnitSampler] = [:]
     private var audioBuffers: [String: AVAudioPCMBuffer] = [:]
     
     /// Directory per i suoni caricati dall'utente
@@ -60,8 +61,21 @@ final class AudioEngineManager: ObservableObject {
             masterGainParam?.value = 0.0
         }
         
+        // Configurazione del Peak Limiter per evitare distorsione
+        if let au = limiter.auAudioUnit.parameterTree {
+            // Parametri tipici: Attack 0.001s, Release 0.010, Pre-gain 0.0dB
+            let attackParam = au.parameter(withAddress: 0) // kPeakLimiterParam_AttackTime
+            let releaseParam = au.parameter(withAddress: 1) // kPeakLimiterParam_ReleaseTime
+            let preGainParam = au.parameter(withAddress: 2) // kPeakLimiterParam_PreGain
+            
+            attackParam?.value = 0.001
+            releaseParam?.value = 0.010
+            preGainParam?.value = 0.0
+        }
+        
         // Configurazione del Sub-Mixer: riceve tutti gli strumenti e li scala prima degli effetti
-        instrumentMixer.outputVolume = 0.25 // Headroom strutturale (V3: 0.25 = somma di 4 full-power kick)
+        // V3 (Ottimizzato): 0.15 = Headroom strutturale elevata per evitare summing clip nelle basse frequenze
+        instrumentMixer.outputVolume = 0.15 
         
         engine.attach(instrumentMixer)
         engine.attach(compressor)
@@ -147,7 +161,7 @@ final class AudioEngineManager: ObservableObject {
     }
     
     private func setupNodeAndLoadBuffer(named name: String) {
-        if livePlayerNodes[name] != nil { return }
+        if samplers[name] != nil || livePlayerNodes[name] != nil { return }
         
         let fileManager = FileManager.default
         let currentDir = fileManager.currentDirectoryPath
@@ -189,37 +203,59 @@ final class AudioEngineManager: ObservableObject {
 
         if let url = foundURL {
             do {
+                // Nuova Architettura: Utilizzo di AVAudioUnitSampler (Migliore per Kick/Drum Machine)
+                let sampler = AVAudioUnitSampler()
+                engine.attach(sampler)
+                
+                let format = engine.mainMixerNode.outputFormat(forBus: 0)
+                engine.connect(sampler, to: instrumentMixer, format: format)
+                
+                try sampler.loadAudioFiles(at: [url])
+                
+                // Configurazione Monofonia se è un Kick (per eliminare clipping di somma)
+                if name.lowercased().contains("kick") {
+                    var limit: UInt32 = 1
+                    let propertyID: AudioUnitPropertyID = 28 // kAudioUnitProperty_GroupPolyphonyLimit
+                    AudioUnitSetProperty(sampler.audioUnit, 
+                                        propertyID, 
+                                        kAudioUnitScope_Global, 0, 
+                                        &limit, 
+                                        UInt32(MemoryLayout<UInt32>.size))
+                }
+                
+                samplers[name] = sampler
+                print("[MacBeat] ✅ Caricato (Sampler): \(name).\(url.pathExtension)")
+                
+                // Fallback per Buffers se servissero ancora altrove
                 let file = try AVAudioFile(forReading: url)
                 let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length))!
                 try file.read(into: buffer)
-                
-                var nodes: [AVAudioPlayerNode] = []
-                for _ in 0..<8 { // Aumentata polifonia a 8 voci per evitare click su restart
-                    let liveNode = AVAudioPlayerNode()
-                    liveNode.volume = 0.80 // Volume interno alto, l'headroom è gestita dal sub-mixer (V3)
-                    engine.attach(liveNode)
-                    engine.connect(liveNode, to: instrumentMixer, format: file.processingFormat)
-                    nodes.append(liveNode)
-                }
-                
-                livePlayerNodes[name] = nodes
                 audioBuffers[name] = buffer
                 
-                print("[MacBeat] ✅ Caricato: \(name).\(url.pathExtension)")
             } catch {
-                print("❌ Errore caricamento \(name): \(error)")
+                print("❌ Errore caricamento Sampler \(name): \(error)")
             }
         }
     }
 
-    /// Suona un campione cercando una voce libera (8-Voice Polyphony)
+    /// Suona un campione cercando una voce libera (Usa Sampler o PlayerNodes)
     func playSample(named name: String, source: String? = nil) {
+        if let sampler = samplers[name] {
+            if !engine.isRunning { try? engine.start() }
+            // Ferma la nota precedente per sicurezza (evita droni/"uuuu")
+            sampler.stopNote(60, onChannel: 0)
+            // Trigger della nota con Velocity alta
+            sampler.startNote(60, withVelocity: 100, onChannel: 0)
+            triggerVisualEffect(named: name, source: source)
+            return
+        }
+
         guard let nodes = livePlayerNodes[name], let buffer = audioBuffers[name] else { 
             setupNodeAndLoadBuffer(named: name)
-            // Se non caricato ora, usciamo
-            guard let retryNodes = livePlayerNodes[name], let retryBuffer = audioBuffers[name] else { return }
-            selectAndPlay(nodes: retryNodes, buffer: retryBuffer)
-            triggerVisualEffect(named: name, source: source)
+            // Se caricato ora come sampler nel giro sopra, riproviamo trigger ricorsivo (o usciamo se fallito)
+            if samplers[name] != nil || livePlayerNodes[name] != nil {
+                playSample(named: name, source: source)
+            }
             return 
         }
         
@@ -231,22 +267,25 @@ final class AudioEngineManager: ObservableObject {
     private func selectAndPlay(nodes: [AVAudioPlayerNode], buffer: AVAudioPCMBuffer, isKick: Bool = false) {
         if !engine.isRunning { try? engine.start() }
 
-        // Trova il primo nodo non in riproduzione
+        // Gestione MONOFONICA per il Kick (evita clipping basse frequenze e mud)
+        if isKick {
+            // Ferma TUTTI i nodi del Kick in riproduzione PRIMA di farne partire uno nuovo
+            // Questo garantisce che non ci sia mai energia residua sommata (Voice Stealing)
+            for node in nodes {
+                if node.isPlaying {
+                    node.stop()
+                }
+            }
+        }
+
+        // Trova il primo nodo libero (idle) per suonare
         let idleNode = nodes.first { !$0.isPlaying }
         
         if let node = idleNode {
-            // Se è un Kick e ci sono troppe voci attive, limitiamo a 2 per evitare clip di frequenze basse
-            if isKick {
-                let playingNodes = nodes.filter { $0.isPlaying }
-                if playingNodes.count >= 2 {
-                    // Ferma la più vecchia
-                    playingNodes[0].stop()
-                }
-            }
             node.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
             node.play()
         } else {
-            // Se tutti occupati, usiamo il primo e lo interrompiamo
+            // Se tutti occupati (fallback raro per polyphony), usiamo il primo e lo interrompiamo
             let busyNode = nodes[0]
             busyNode.stop()
             busyNode.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
@@ -286,10 +325,16 @@ final class AudioEngineManager: ObservableObject {
                 node.stop()
             }
         }
+        for sampler in samplers.values {
+            sampler.stopNote(60, onChannel: 0)
+        }
     }
 
     /// Ferma un campione specifico immediatamente
     func stopSample(named name: String) {
+        if let sampler = samplers[name] {
+            sampler.stopNote(60, onChannel: 0)
+        }
         if let nodes = livePlayerNodes[name] {
             for node in nodes {
                 node.stop()
