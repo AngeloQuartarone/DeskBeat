@@ -5,35 +5,17 @@ import Foundation
 final class AudioEngineManager: ObservableObject {
     static let shared = AudioEngineManager()
     @Published var userSounds: [String] = []
-    private let engine = AVAudioEngine()
-    private let limiter: AVAudioUnitEffect = {
-        var description = AudioComponentDescription()
-        description.componentType = kAudioUnitType_Effect
-        description.componentSubType = kAudioUnitSubType_PeakLimiter
-        description.componentManufacturer = kAudioUnitManufacturer_Apple
-        description.componentFlags = 0
-        description.componentFlagsMask = 0
-        return AVAudioUnitEffect(audioComponentDescription: description)
-    }()
-
-    private let compressor: AVAudioUnitEffect = {
-        var description = AudioComponentDescription()
-        description.componentType = kAudioUnitType_Effect
-        description.componentSubType = kAudioUnitSubType_DynamicsProcessor
-        description.componentManufacturer = kAudioUnitManufacturer_Apple
-        description.componentFlags = 0
-        description.componentFlagsMask = 0
-        return AVAudioUnitEffect(audioComponentDescription: description)
-    }()
-
-    private let instrumentMixer = AVAudioMixerNode()
     
-    // Player nodes per il trigger live (8-Voice Polyphony per evitare click/pop)
+    // 1. TRASFORmati in 'var' per poterli distruggere e ricreare
+    private var engine = AVAudioEngine()
+    private var limiter: AVAudioUnitEffect
+    private var compressor: AVAudioUnitEffect
+    private var instrumentMixer = AVAudioMixerNode()
+    
     private var livePlayerNodes: [String: [AVAudioPlayerNode]] = [:]
     private var samplers: [String: AVAudioUnitSampler] = [:]
     private var audioBuffers: [String: AVAudioPCMBuffer] = [:]
     
-    /// Directory per i suoni caricati dall'utente
     let userSoundsDir: URL
     
     private init() {
@@ -43,67 +25,86 @@ final class AudioEngineManager: ObservableObject {
         
         try? fileManager.createDirectory(at: userSoundsDir, withIntermediateDirectories: true)
         
-        // Configura il compressore via AudioUnit parameters
+        // Inizializzazione corretta per superare il check di AVFoundation
+        let limiterDesc = AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_PeakLimiter, componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
+        self.limiter = AVAudioUnitEffect(audioComponentDescription: limiterDesc)
+        
+        let compDesc = AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_DynamicsProcessor, componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
+        self.compressor = AVAudioUnitEffect(audioComponentDescription: compDesc)
+        
+        // Avvio il vero setup che simula il riavvio
+        hardRebootSystem()
+    }
+    
+    // MARK: - HARD REBOOT
+    
+    /// DISTRUGGE E RICREA COMPLETAMENTE L'AUDIO ENGINE (Simula l'apertura dell'app)
+    func hardRebootSystem() {
+        print("[MacBeat] 🔄 Riavvio completo dell'Audio Engine in corso...")
+        
+        // Ferma e svuota tutto
+        if engine.isRunning { engine.stop() }
+        samplers.removeAll()
+        livePlayerNodes.removeAll()
+        audioBuffers.removeAll()
+        
+        // Ricrea le istanze principali da zero (pulisce i "bug" zombie di memoria)
+        engine = AVAudioEngine()
+        instrumentMixer = AVAudioMixerNode()
+        
+        let limiterDesc = AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_PeakLimiter, componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
+        limiter = AVAudioUnitEffect(audioComponentDescription: limiterDesc)
+        
+        let compDesc = AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_DynamicsProcessor, componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
+        compressor = AVAudioUnitEffect(audioComponentDescription: compDesc)
+        
+        // Configura Parametri Compressore
         if let au = compressor.auAudioUnit.parameterTree {
-            // Parametri tipici per un compressore "soft"
-            let thresholdParam = au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_Threshold))
-            let headRoomParam = au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_HeadRoom))
-            let expansionRatioParam = au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_ExpansionRatio))
-            let attackTimeParam = au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_AttackTime))
-            let releaseTimeParam = au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_ReleaseTime))
-            let masterGainParam = au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_OverallGain))
-            
-            thresholdParam?.value = -12.0
-            headRoomParam?.value = 2.0
-            expansionRatioParam?.value = 2.0
-            attackTimeParam?.value = 0.002
-            releaseTimeParam?.value = 0.05
-            masterGainParam?.value = 0.0
+            au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_Threshold))?.value = -12.0
+            au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_HeadRoom))?.value = 2.0
+            au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_ExpansionRatio))?.value = 2.0
+            au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_AttackTime))?.value = 0.002
+            au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_ReleaseTime))?.value = 0.05
+            au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_OverallGain))?.value = 0.0
         }
         
-        // Configurazione del Peak Limiter per evitare distorsione
+        // Configura Parametri Limiter
         if let au = limiter.auAudioUnit.parameterTree {
-            // Parametri tipici: Attack 0.001s, Release 0.010, Pre-gain 0.0dB
-            let attackParam = au.parameter(withAddress: 0) // kPeakLimiterParam_AttackTime
-            let releaseParam = au.parameter(withAddress: 1) // kPeakLimiterParam_ReleaseTime
-            let preGainParam = au.parameter(withAddress: 2) // kPeakLimiterParam_PreGain
-            
-            attackParam?.value = 0.001
-            releaseParam?.value = 0.010
-            preGainParam?.value = 0.0
+            au.parameter(withAddress: 0)?.value = 0.001
+            au.parameter(withAddress: 1)?.value = 0.010
+            au.parameter(withAddress: 2)?.value = 0.0
         }
         
-        // Configurazione del Sub-Mixer: riceve tutti gli strumenti e li scala prima degli effetti
-        // V3 (Ottimizzato): 0.15 = Headroom strutturale elevata per evitare summing clip nelle basse frequenze
         instrumentMixer.outputVolume = 0.15 
         
+        // Attacca e Connetti
         engine.attach(instrumentMixer)
         engine.attach(compressor)
         engine.attach(limiter)
         
-        // Re-routing: InstrumentMixer -> Compressor -> Limiter -> Output
         let format = engine.mainMixerNode.outputFormat(forBus: 0)
         engine.connect(instrumentMixer, to: compressor, format: format)
         engine.connect(compressor, to: limiter, format: format)
         engine.connect(limiter, to: engine.mainMixerNode, format: format)
 
+        // Ricarica tutti i campioni
         loadSamples()
         refreshUserSounds()
         
         do {
             engine.prepare()
             try engine.start()
-            print("[MacBeat] 🔊 Motore Audio Pronto (Mono/Interrupt)")
+            print("[MacBeat] ✅ Motore Audio Riavviato da zero e Pronto!")
         } catch {
-            print("❌ Errore critico Audio Engine: \(error)")
+            print("❌ Errore critico Riavvio Audio Engine: \(error)")
         }
     }
     
-    /// Scansiona i file audio nella directory "Sounds" o nella cartella utente
+    // MARK: - CORE ENGINE FUNCS
+    
     func getAvailableSoundFiles(in folderName: String) -> [String] {
         let fileManager = FileManager.default
         let currentDir = fileManager.currentDirectoryPath
-        
         var basePaths: [String]
         
         if folderName == "UserSounds" {
@@ -120,7 +121,7 @@ final class AudioEngineManager: ObservableObject {
         }
         
         var foundFiles: [String] = []
-        let extensions = ["mp3", "wav"] // Solo wav e mp3 come richiesto
+        let extensions = ["mp3", "wav"]
         
         for basePath in basePaths {
             if let files = try? fileManager.contentsOfDirectory(atPath: basePath) {
@@ -133,11 +134,9 @@ final class AudioEngineManager: ObservableObject {
                 if !foundFiles.isEmpty { break }
             }
         }
-        
         return Array(Set(foundFiles)).sorted()
     }
 
-    /// Forza il rinfresco della lista suoni utente (chiamata dai metodi di aggiunta/rimozione)
     func refreshUserSounds() {
         let sounds = getAvailableSoundFiles(in: "UserSounds")
         DispatchQueue.main.async {
@@ -145,7 +144,6 @@ final class AudioEngineManager: ObservableObject {
         }
     }
 
-    /// Ritorna la lista dei nomi dei suoni aggiunti dall'utente
     func getUserAddedSounds() -> [String] {
         return getAvailableSoundFiles(in: "UserSounds")
     }
@@ -165,11 +163,9 @@ final class AudioEngineManager: ObservableObject {
         
         let fileManager = FileManager.default
         let currentDir = fileManager.currentDirectoryPath
-        let extensions = ["mp3", "wav"] // Solo wav e mp3
-        
+        let extensions = ["mp3", "wav"]
         var foundURL: URL? = nil
         
-        // Prima cerchiamo nei suoni utente (hanno la priorità in caso di omonimia)
         for ext in extensions {
             let userPath = userSoundsDir.appendingPathComponent("\(name).\(ext)")
             if fileManager.fileExists(atPath: userPath.path) {
@@ -178,20 +174,17 @@ final class AudioEngineManager: ObservableObject {
             }
         }
         
-        // Se non trovato, cerchiamo nella radice di Sounds
         if foundURL == nil {
             outerLoop: for ext in extensions {
                 if let moduleURL = Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Sounds") {
                     foundURL = moduleURL
                     break outerLoop
                 }
-                
                 let pathsToTry = [
                     "\(currentDir)/Sources/MacBeat/Resources/Sounds/\(name).\(ext)",
                     "\(currentDir)/Resources/Sounds/\(name).\(ext)",
                     "\(currentDir)/Sounds/\(name).\(ext)"
                 ]
-                
                 for path in pathsToTry {
                     if fileManager.fileExists(atPath: path) {
                         foundURL = URL(fileURLWithPath: path)
@@ -203,30 +196,18 @@ final class AudioEngineManager: ObservableObject {
 
         if let url = foundURL {
             do {
-                // Nuova Architettura: Utilizzo di AVAudioUnitSampler (Migliore per Kick/Drum Machine)
                 let sampler = AVAudioUnitSampler()
                 engine.attach(sampler)
-                
-                let format = engine.mainMixerNode.outputFormat(forBus: 0)
-                engine.connect(sampler, to: instrumentMixer, format: format)
-                
+                engine.connect(sampler, to: instrumentMixer, format: nil)
                 try sampler.loadAudioFiles(at: [url])
                 
-                // Configurazione Monofonia se è un Kick (per eliminare clipping di somma)
                 if name.lowercased().contains("kick") {
                     var limit: UInt32 = 1
-                    let propertyID: AudioUnitPropertyID = 28 // kAudioUnitProperty_GroupPolyphonyLimit
-                    AudioUnitSetProperty(sampler.audioUnit, 
-                                        propertyID, 
-                                        kAudioUnitScope_Global, 0, 
-                                        &limit, 
-                                        UInt32(MemoryLayout<UInt32>.size))
+                    AudioUnitSetProperty(sampler.audioUnit, 28, kAudioUnitScope_Global, 0, &limit, UInt32(MemoryLayout<UInt32>.size))
                 }
                 
                 samplers[name] = sampler
-                print("[MacBeat] ✅ Caricato (Sampler): \(name).\(url.pathExtension)")
                 
-                // Fallback per Buffers se servissero ancora altrove
                 let file = try AVAudioFile(forReading: url)
                 let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length))!
                 try file.read(into: buffer)
@@ -238,13 +219,10 @@ final class AudioEngineManager: ObservableObject {
         }
     }
 
-    /// Suona un campione cercando una voce libera (Usa Sampler o PlayerNodes)
     func playSample(named name: String, source: String? = nil) {
         if let sampler = samplers[name] {
             if !engine.isRunning { try? engine.start() }
-            // Ferma la nota precedente per sicurezza (evita droni/"uuuu")
             sampler.stopNote(60, onChannel: 0)
-            // Trigger della nota con Velocity alta
             sampler.startNote(60, withVelocity: 100, onChannel: 0)
             triggerVisualEffect(named: name, source: source)
             return
@@ -252,7 +230,6 @@ final class AudioEngineManager: ObservableObject {
 
         guard let nodes = livePlayerNodes[name], let buffer = audioBuffers[name] else { 
             setupNodeAndLoadBuffer(named: name)
-            // Se caricato ora come sampler nel giro sopra, riproviamo trigger ricorsivo (o usciamo se fallito)
             if samplers[name] != nil || livePlayerNodes[name] != nil {
                 playSample(named: name, source: source)
             }
@@ -266,26 +243,14 @@ final class AudioEngineManager: ObservableObject {
 
     private func selectAndPlay(nodes: [AVAudioPlayerNode], buffer: AVAudioPCMBuffer, isKick: Bool = false) {
         if !engine.isRunning { try? engine.start() }
-
-        // Gestione MONOFONICA per il Kick (evita clipping basse frequenze e mud)
         if isKick {
-            // Ferma TUTTI i nodi del Kick in riproduzione PRIMA di farne partire uno nuovo
-            // Questo garantisce che non ci sia mai energia residua sommata (Voice Stealing)
-            for node in nodes {
-                if node.isPlaying {
-                    node.stop()
-                }
-            }
+            for node in nodes { if node.isPlaying { node.stop() } }
         }
-
-        // Trova il primo nodo libero (idle) per suonare
         let idleNode = nodes.first { !$0.isPlaying }
-        
         if let node = idleNode {
             node.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
             node.play()
         } else {
-            // Se tutti occupati (fallback raro per polyphony), usiamo il primo e lo interrompiamo
             let busyNode = nodes[0]
             busyNode.stop()
             busyNode.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
@@ -302,15 +267,7 @@ final class AudioEngineManager: ObservableObject {
             )
         }
     }
-    
-    private func playNode(_ node: AVAudioPlayerNode, with buffer: AVAudioPCMBuffer) {
-        // Metodo mantenuto per retrocompatibilità interna se necessario, ma selectAndPlay è prioritario ora
-        if !engine.isRunning { try? engine.start() }
-        node.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
-        node.play()
-    }
 
-    /// Ferma il motore audio completamente per risparmiare batteria
     func stopEngine() {
         if engine.isRunning {
             engine.stop()
@@ -318,33 +275,24 @@ final class AudioEngineManager: ObservableObject {
         }
     }
 
-    /// Ferma immediatamente tutti i campioni in riproduzione
     func stopAllSamples() {
         for nodeList in livePlayerNodes.values {
-            for node in nodeList {
-                node.stop()
-            }
+            for node in nodeList { node.stop() }
         }
         for sampler in samplers.values {
             sampler.stopNote(60, onChannel: 0)
         }
     }
 
-    /// Ferma un campione specifico immediatamente
     func stopSample(named name: String) {
-        if let sampler = samplers[name] {
-            sampler.stopNote(60, onChannel: 0)
-        }
+        if let sampler = samplers[name] { sampler.stopNote(60, onChannel: 0) }
         if let nodes = livePlayerNodes[name] {
-            for node in nodes {
-                node.stop()
-            }
+            for node in nodes { node.stop() }
         }
     }
 
-    // MARK: - User Sound Management
-
-    /// Aggiunge un nuovo suono utente copiandolo nella directory dedicata
+    // MARK: - USER SOUND MANAGEMENT
+    
     func addUserSound(from url: URL) -> String? {
         let ext = url.pathExtension.lowercased()
         guard ext == "wav" || ext == "mp3" else { return nil }
@@ -353,15 +301,16 @@ final class AudioEngineManager: ObservableObject {
         let destinationURL = userSoundsDir.appendingPathComponent("\(fileName).\(ext)")
         
         do {
-            // Se esiste già, lo rimuoviamo per sovrascriverlo
             if FileManager.default.fileExists(atPath: destinationURL.path) {
                 try FileManager.default.removeItem(at: destinationURL)
             }
             try FileManager.default.copyItem(at: url, to: destinationURL)
             
-            // Carica immediatamente il nuovo suono nel motore audio
-            setupNodeAndLoadBuffer(named: fileName)
-            refreshUserSounds()
+            // Invece di iniettare nel motore attivo, RIAVVIAMO L'INTERO SISTEMA!
+            DispatchQueue.main.async {
+                self.hardRebootSystem()
+            }
+            
             return fileName
         } catch {
             print("❌ Errore durante l'aggiunta del suono: \(error)")
@@ -369,7 +318,6 @@ final class AudioEngineManager: ObservableObject {
         }
     }
 
-    /// Rimuove un suono utente
     func removeUserSound(named name: String) {
         let fileManager = FileManager.default
         let extensions = ["mp3", "wav"]
@@ -380,19 +328,11 @@ final class AudioEngineManager: ObservableObject {
                 try? fileManager.removeItem(at: fileURL)
             }
         }
+        print("[MacBeat] 🗑️ Rimosso fisicamente: \(name)")
         
-        // Rimuovi dal motore audio
-        if let nodes = livePlayerNodes[name] {
-            for node in nodes {
-                node.stop()
-                engine.detach(node)
-            }
-            livePlayerNodes.removeValue(forKey: name)
-            audioBuffers.removeValue(forKey: name)
-            print("[MacBeat] 🗑️ Rimosso: \(name)")
+        // Eseguendo il reboot, il suono non verrà ricaricato e i vecchi nodi moriranno
+        DispatchQueue.main.async {
+            self.hardRebootSystem()
         }
-        
-        // Forza l'aggiornamento della lista (fuori da if let per coprire casi non caricati)
-        refreshUserSounds()
     }
 }
