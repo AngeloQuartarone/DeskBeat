@@ -65,8 +65,9 @@ final class LooperManager: ObservableObject {
     private let silenceThreshold: TimeInterval = 1.5
     private var playbackTimer: Timer?
     
-    // Per gestire il trigger dei suoni in modo preciso
+    // Per gestire il trigger dei suoni in modo preciso ed evitare il "Double Trigger"
     private var lastTriggeredStep: Int = -1
+    private var manualTriggerGuard: [String: Int] = [:] // InstrumentID -> StepIndex
 
     private init() {
         setupDefaultPads()
@@ -187,6 +188,10 @@ final class LooperManager: ObservableObject {
                 grid[currentInstrument] = Array(repeating: false, count: totalSteps)
             }
             grid[currentInstrument]?[stepIdx] = true
+            
+            // Registriamo che questo colpo è stato suonato manualmente in questo step
+            // Serve a impedire al sequencer di risuonarlo tra pochi millisecondi (Double Trigger)
+            manualTriggerGuard[currentInstrument] = stepIdx
         }
     }
 
@@ -289,6 +294,12 @@ final class LooperManager: ObservableObject {
     private func triggerStep(_ stepIndex: Int) {
         for (instrumentID, steps) in grid {
             if steps[stepIndex] && !mutedInstruments.contains(instrumentID) {
+                // Se abbiamo appena suonato questo strumento a mano su questo step, saltiamo il sequencer per un giro
+                if manualTriggerGuard[instrumentID] == stepIndex {
+                    manualTriggerGuard.removeValue(forKey: instrumentID)
+                    continue
+                }
+                
                 AudioEngineManager.shared.playSample(named: instrumentID)
             }
         }
@@ -311,6 +322,7 @@ final class LooperManager: ObservableObject {
         calculatedBPM = 0
         state = .idle
         currentStep = -1
+        manualTriggerGuard.removeAll()
         AudioEngineManager.shared.silenceApp()
     }
 }
