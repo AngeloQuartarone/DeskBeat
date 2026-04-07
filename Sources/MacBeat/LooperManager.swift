@@ -259,6 +259,7 @@ final class LooperManager: ObservableObject {
         // Timer ad alta frequenza per scansionare la griglia
         let timer = Timer(timeInterval: 0.005, repeats: true) { [weak self] _ in
             guard let self = self, self.state == .looping else { return }
+            guard !AudioEngineManager.shared.isRebooting else { return }
 
             let currentTime = ProcessInfo.processInfo.systemUptime
             guard let startTime = self.loopStartTime else { return }
@@ -310,6 +311,6 @@ final class LooperManager: ObservableObject {
         calculatedBPM = 0
         state = .idle
         currentStep = -1
-        AudioEngineManager.shared.stopAllSamples()
+        AudioEngineManager.shared.silenceApp()
     }
 }

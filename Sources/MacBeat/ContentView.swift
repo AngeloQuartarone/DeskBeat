@@ -121,8 +121,8 @@ struct ContentView: View {
             if !motionManager.playInBackground {
                 motionManager.isMonitoring = false
                 looper.reset()
-                AudioEngineManager.shared.stopAllSamples()
-                AudioEngineManager.shared.stopEngine()
+                AudioEngineManager.shared.silenceApp()
+                AudioEngineManager.shared.pauseEngine()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSPopover.didShowNotification)) { _ in
@@ -133,8 +133,8 @@ struct ContentView: View {
             if !motionManager.playInBackground {
                 motionManager.isMonitoring = false
                 looper.reset()
-                AudioEngineManager.shared.stopAllSamples()
-                AudioEngineManager.shared.stopEngine()
+                AudioEngineManager.shared.silenceApp()
+                AudioEngineManager.shared.pauseEngine()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
@@ -161,8 +161,8 @@ struct ContentView: View {
         if !motionManager.playInBackground {
             motionManager.isMonitoring = false
             looper.reset()
-            AudioEngineManager.shared.stopAllSamples()
-            AudioEngineManager.shared.stopEngine()
+            AudioEngineManager.shared.silenceApp()
+            AudioEngineManager.shared.pauseEngine()
         }
         NSApplication.shared.hide(nil)
     }

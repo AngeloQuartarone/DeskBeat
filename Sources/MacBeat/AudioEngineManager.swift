@@ -12,6 +12,10 @@ final class AudioEngineManager: ObservableObject {
     private var compressor: AVAudioUnitEffect
     private var instrumentMixer = AVAudioMixerNode()
     
+    // NEW: Safety and Threading
+    private let engineQueue = DispatchQueue(label: "com.macbeat.engineQueue")
+    @Published private(set) var isRebooting = false
+    
     private var livePlayerNodes: [String: [AVAudioPlayerNode]] = [:]
     private var samplers: [String: AVAudioUnitSampler] = [:]
     private var audioBuffers: [String: AVAudioPCMBuffer] = [:]
@@ -34,69 +38,88 @@ final class AudioEngineManager: ObservableObject {
         
         // Avvio il vero setup che simula il riavvio
         hardRebootSystem()
+        setupNotifications()
+    }
+    
+    // MARK: - NOTIFICATIONS
+    
+    private func setupNotifications() {
+        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] _ in
+            print("[MacBeat] ⚠️ Configurazione Audio cambiata (Hardware change/Sample Rate). Reboot necessario...")
+            self?.hardRebootSystem()
+        }
     }
     
     // MARK: - HARD REBOOT
     
     /// DISTRUGGE E RICREA COMPLETAMENTE L'AUDIO ENGINE (Simula l'apertura dell'app)
     func hardRebootSystem() {
-        print("[MacBeat] 🔄 Riavvio completo dell'Audio Engine in corso...")
-        
-        // Ferma e svuota tutto
-        if engine.isRunning { engine.stop() }
-        samplers.removeAll()
-        livePlayerNodes.removeAll()
-        audioBuffers.removeAll()
-        
-        // Ricrea le istanze principali da zero (pulisce i "bug" zombie di memoria)
-        engine = AVAudioEngine()
-        instrumentMixer = AVAudioMixerNode()
-        
-        let limiterDesc = AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_PeakLimiter, componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
-        limiter = AVAudioUnitEffect(audioComponentDescription: limiterDesc)
-        
-        let compDesc = AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_DynamicsProcessor, componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
-        compressor = AVAudioUnitEffect(audioComponentDescription: compDesc)
-        
-        // Configura Parametri Compressore
-        if let au = compressor.auAudioUnit.parameterTree {
-            au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_Threshold))?.value = -12.0
-            au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_HeadRoom))?.value = 2.0
-            au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_ExpansionRatio))?.value = 2.0
-            au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_AttackTime))?.value = 0.002
-            au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_ReleaseTime))?.value = 0.05
-            au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_OverallGain))?.value = 0.0
-        }
-        
-        // Configura Parametri Limiter
-        if let au = limiter.auAudioUnit.parameterTree {
-            au.parameter(withAddress: 0)?.value = 0.001
-            au.parameter(withAddress: 1)?.value = 0.010
-            au.parameter(withAddress: 2)?.value = 0.0
-        }
-        
-        instrumentMixer.outputVolume = 0.15 
-        
-        // Attacca e Connetti
-        engine.attach(instrumentMixer)
-        engine.attach(compressor)
-        engine.attach(limiter)
-        
-        let format = engine.mainMixerNode.outputFormat(forBus: 0)
-        engine.connect(instrumentMixer, to: compressor, format: format)
-        engine.connect(compressor, to: limiter, format: format)
-        engine.connect(limiter, to: engine.mainMixerNode, format: format)
+        engineQueue.sync {
+            DispatchQueue.main.async { self.isRebooting = true }
+            print("[MacBeat] 🔄 Riavvio completo dell'Audio Engine in corso...")
+            
+            // Ferma correttamente l'engine esistente e scollega tutto prima di deallocare
+            if engine.isRunning { 
+                engine.stop() 
+            }
+            
+            // Svuota buffer e nodi in arrivo dalla vecchia istanza
+            samplers.removeAll()
+            livePlayerNodes.removeAll()
+            audioBuffers.removeAll()
+            
+            // Ricrea le istanze principali da zero (pulisce i "bug" zombie di memoria)
+            engine = AVAudioEngine()
+            instrumentMixer = AVAudioMixerNode()
+            
+            let limiterDesc = AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_PeakLimiter, componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
+            limiter = AVAudioUnitEffect(audioComponentDescription: limiterDesc)
+            
+            let compDesc = AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_DynamicsProcessor, componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
+            compressor = AVAudioUnitEffect(audioComponentDescription: compDesc)
+            
+            // Configura Parametri Compressore
+            if let au = compressor.auAudioUnit.parameterTree {
+                au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_Threshold))?.value = -12.0
+                au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_HeadRoom))?.value = 2.0
+                au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_ExpansionRatio))?.value = 2.0
+                au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_AttackTime))?.value = 0.002
+                au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_ReleaseTime))?.value = 0.05
+                au.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_OverallGain))?.value = 0.0
+            }
+            
+            // Configura Parametri Limiter
+            if let au = limiter.auAudioUnit.parameterTree {
+                au.parameter(withAddress: 0)?.value = 0.001
+                au.parameter(withAddress: 1)?.value = 0.010
+                au.parameter(withAddress: 2)?.value = 0.0
+            }
+            
+            instrumentMixer.outputVolume = 0.15 
+            
+            // Attacca e Connetti
+            engine.attach(instrumentMixer)
+            engine.attach(compressor)
+            engine.attach(limiter)
+            
+            let format = engine.mainMixerNode.outputFormat(forBus: 0)
+            engine.connect(instrumentMixer, to: compressor, format: format)
+            engine.connect(compressor, to: limiter, format: format)
+            engine.connect(limiter, to: engine.mainMixerNode, format: format)
 
-        // Ricarica tutti i campioni
-        loadSamples()
-        refreshUserSounds()
-        
-        do {
-            engine.prepare()
-            try engine.start()
-            print("[MacBeat] ✅ Motore Audio Riavviato da zero e Pronto!")
-        } catch {
-            print("❌ Errore critico Riavvio Audio Engine: \(error)")
+            // Ricarica tutti i campioni
+            loadSamples()
+            refreshUserSounds()
+            
+            do {
+                engine.prepare()
+                try engine.start()
+                print("[MacBeat] ✅ Motore Audio Riavviato da zero e Pronto!")
+            } catch {
+                print("❌ Errore critico Riavvio Audio Engine: \(error)")
+            }
+            
+            DispatchQueue.main.async { self.isRebooting = false }
         }
     }
     
@@ -220,8 +243,12 @@ final class AudioEngineManager: ObservableObject {
     }
 
     func playSample(named name: String, source: String? = nil) {
+        guard !isRebooting else { return }
+        
         if let sampler = samplers[name] {
-            if !engine.isRunning { try? engine.start() }
+            if !engine.isRunning { 
+                try? engine.start() 
+            }
             sampler.stopNote(60, onChannel: 0)
             sampler.startNote(60, withVelocity: 100, onChannel: 0)
             triggerVisualEffect(named: name, source: source)
@@ -268,19 +295,30 @@ final class AudioEngineManager: ObservableObject {
         }
     }
 
-    func stopEngine() {
-        if engine.isRunning {
-            engine.stop()
-            print("[MacBeat] 💤 Motore Audio fermato (Battery Save)")
+    func pauseEngine() {
+        engineQueue.sync {
+            if engine.isRunning {
+                engine.pause()
+                print("[MacBeat] ⏸️ Motore Audio in pausa (Warm Standby)")
+            }
         }
     }
 
-    func stopAllSamples() {
-        for nodeList in livePlayerNodes.values {
-            for node in nodeList { node.stop() }
-        }
-        for sampler in samplers.values {
-            sampler.stopNote(60, onChannel: 0)
+    func silenceApp() {
+        engineQueue.sync {
+            // Silenzia i PlayerNodes
+            for nodeList in livePlayerNodes.values {
+                for node in nodeList { 
+                    node.stop() 
+                    node.reset()
+                }
+            }
+            // Silenzia i Sampler
+            for sampler in samplers.values {
+                sampler.stopNote(60, onChannel: 0)
+                sampler.auAudioUnit.reset()
+            }
+            print("[MacBeat] 🔇 App silenziosamente ripulita")
         }
     }
 
