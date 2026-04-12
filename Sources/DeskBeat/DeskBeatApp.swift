@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct MacBeatApp: App {
+struct DeskBeatApp: App {
     @StateObject private var motionManager = MotionManager.shared
 
     private var menuBarIcon: NSImage? {

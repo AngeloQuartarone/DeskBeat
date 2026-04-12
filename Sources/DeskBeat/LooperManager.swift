@@ -219,7 +219,6 @@ final class LooperManager: ObservableObject {
         while roughBeat > 1.0  { roughBeat /= 2 }
 
         let totalTappedTime = rawEvents.last!.time
-        let beatsInBar = 4.0 // Assumiamo 4/4
         let estimatedBeats = max(1.0, round(totalTappedTime / roughBeat))
         
         // Forziamo il loop duration a essere esattamente 1 battuta (4 beats) per ora

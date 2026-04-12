@@ -5,11 +5,11 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSMotionUsageDescription</key>
-    <string>MacBeat uses the accelerometer to detect taps on your laptop chassis and trigger drum sounds.</string>
+    <string>DeskBeat uses the accelerometer to detect taps on your laptop chassis and trigger drum sounds.</string>
     <key>CFBundleName</key>
-    <string>MacBeat</string>
+    <string>DeskBeat</string>
     <key>CFBundleIdentifier</key>
-    <string>com.macbeat.app</string>
+    <string>com.deskbeat.app</string>
     <key>CFBundleVersion</key>
     <string>1.0</string>
     <key>CFBundleShortVersionString</key>

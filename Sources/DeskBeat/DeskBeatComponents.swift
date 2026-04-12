@@ -352,7 +352,7 @@ struct FooterView: View {
     var body: some View {
         HStack {
             Spacer()
-            Button("Quit MacBeat") { exit(0) }
+            Button("Quit DeskBeat") { exit(0) }
                 .font(.system(size: 11, weight: .medium))
                 .keyboardShortcut("q", modifiers: .command)
                 .buttonStyle(.plain)

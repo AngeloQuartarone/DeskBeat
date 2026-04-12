@@ -15,10 +15,10 @@ struct LicenseView: View {
                 .padding(.top, 24)
             
             VStack(spacing: 6) {
-                Text("Unlock Looper Mode")
+                Text("Unlock the Desktop Studio")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                 
-                Text("Enter your MacBeat license key to access the intelligent rhythm engine and custom sounds.")
+                Text("Enter your DeskBeat license key to access the professional Looper engine and custom signal chain.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -75,7 +75,7 @@ struct LicenseView: View {
                     
                     Button("Upgrade to Pro") {
                         // Change this URL to your actual Gumroad checkout link
-                        if let url = URL(string: "https://gumroad.com/l/macbeat") {
+                        if let url = URL(string: "https://gumroad.com/l/deskbeat") {
                             openURL(url)
                         }
                     }

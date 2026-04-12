@@ -3,14 +3,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "MacBeat",
+    name: "DeskBeat",
     platforms: [
         .macOS(.v14)
     ],
     targets: [
         .executableTarget(
-            name: "MacBeat",
-            path: "Sources/MacBeat",
+            name: "DeskBeat",
+            path: "Sources/DeskBeat",
             exclude: ["Info.plist"],
             resources: [
                 .copy("Resources/Sounds"),

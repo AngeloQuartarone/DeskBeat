@@ -7,6 +7,8 @@ struct SettingsView: View {
     @ObservedObject var looper: LooperManager
     @ObservedObject var audioEngine = AudioEngineManager.shared
     @ObservedObject var licenseManager = LicenseManager.shared
+    @AppStorage("hasShownOnboarding") var hasShownOnboarding: Bool = false
+    @Binding var showingOnboarding: Bool
     
     @State private var refreshID = UUID()
 
@@ -25,11 +27,11 @@ struct SettingsView: View {
                     }
 
                     Picker("Level", selection: $motionManager.sensitivityLevel) {
-                        Text("Low").tag(1)
-                        Text("Med").tag(2)
-                        Text("High").tag(3)
-                        Text("Extra").tag(4)
-                        Text("Max").tag(5)
+                        Text("Rigid").tag(1)
+                        Text("Balanced").tag(2)
+                        Text("Resonant").tag(3)
+                        Text("Agile").tag(4)
+                        Text("Hyper").tag(5)
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
@@ -121,6 +123,19 @@ struct SettingsView: View {
 
                     SettingsSection(title: "ADVANCED") {
                         MacToggleRow(label: "Play in background", isOn: $motionManager.playInBackground)
+                        
+                        HStack {
+                            Text("Setup Guide")
+                                .font(.system(size: 12, weight: .medium))
+                            Spacer()
+                            Button("Show Guide") {
+                                showingOnboarding = true
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Color.accentColor)
+                        }
+                        .padding(.top, 4)
                     }
                 }
                 .disabled(!licenseManager.isUnlocked)
@@ -129,7 +144,7 @@ struct SettingsView: View {
                 if !licenseManager.isUnlocked {
                     HStack {
                         Image(systemName: "lock.fill")
-                        Text("Unlock MacBeat Pro to access all features.")
+                        Text("Unlock DeskBeat Pro to access all features.")
                     }
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
@@ -137,11 +152,19 @@ struct SettingsView: View {
                 }
                 
                 #if DEBUG
-                Button("Reset License (Debug)") {
-                    licenseManager.clearLicense()
+                VStack(spacing: 12) {
+                    Button("Reset Setup State (Onboarding)") {
+                        hasShownOnboarding = false
+                    }
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.orange)
+
+                    Button("Reset License (Debug)") {
+                        licenseManager.clearLicense()
+                    }
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.red)
                 }
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.red)
                 .padding(.top, 12)
                 .buttonStyle(.plain)
                 #endif

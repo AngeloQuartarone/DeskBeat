@@ -13,7 +13,7 @@ final class AudioEngineManager: ObservableObject {
     private var instrumentMixer = AVAudioMixerNode()
     
     // NEW: Safety and Threading
-    private let engineQueue = DispatchQueue(label: "com.macbeat.engineQueue")
+    private let engineQueue = DispatchQueue(label: "com.deskbeat.engineQueue")
     @Published private(set) var isRebooting = false
     
     private var livePlayerNodes: [String: [AVAudioPlayerNode]] = [:]
@@ -25,7 +25,7 @@ final class AudioEngineManager: ObservableObject {
     private init() {
         let fileManager = FileManager.default
         let appSupport = try! fileManager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        userSoundsDir = appSupport.appendingPathComponent("com.macbeat.app/UserSounds", isDirectory: true)
+        userSoundsDir = appSupport.appendingPathComponent("com.deskbeat.app/UserSounds", isDirectory: true)
         
         try? fileManager.createDirectory(at: userSoundsDir, withIntermediateDirectories: true)
         
@@ -45,7 +45,7 @@ final class AudioEngineManager: ObservableObject {
     
     private func setupNotifications() {
         NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] _ in
-            print("[MacBeat] ⚠️ Configurazione Audio cambiata (Hardware change/Sample Rate). Reboot necessario...")
+            print("[DeskBeat] ⚠️ Configurazione Audio cambiata (Hardware change/Sample Rate). Reboot necessario...")
             self?.hardRebootSystem()
         }
     }
@@ -56,7 +56,7 @@ final class AudioEngineManager: ObservableObject {
     func hardRebootSystem() {
         engineQueue.sync {
             DispatchQueue.main.async { self.isRebooting = true }
-            print("[MacBeat] 🔄 Riavvio completo dell'Audio Engine in corso...")
+            print("[DeskBeat] 🔄 Riavvio completo dell'Audio Engine in corso...")
             
             // Ferma correttamente l'engine esistente e scollega tutto prima di deallocare
             if engine.isRunning { 
@@ -114,7 +114,7 @@ final class AudioEngineManager: ObservableObject {
             do {
                 engine.prepare()
                 try engine.start()
-                print("[MacBeat] ✅ Motore Audio Riavviato da zero e Pronto!")
+                print("[DeskBeat] ✅ Motore Audio Riavviato da zero e Pronto!")
             } catch {
                 print("❌ Errore critico Riavvio Audio Engine: \(error)")
             }
@@ -137,7 +137,7 @@ final class AudioEngineManager: ObservableObject {
             if let soundsURL = Bundle.module.url(forResource: "Sounds", withExtension: nil) {
                 paths.append(soundsURL.path)
             }
-            paths.append("\(currentDir)/Sources/MacBeat/Resources/Sounds")
+            paths.append("\(currentDir)/Sources/DeskBeat/Resources/Sounds")
             paths.append("\(currentDir)/Resources/Sounds")
             paths.append("\(currentDir)/Sounds")
             basePaths = paths
@@ -204,7 +204,7 @@ final class AudioEngineManager: ObservableObject {
                     break outerLoop
                 }
                 let pathsToTry = [
-                    "\(currentDir)/Sources/MacBeat/Resources/Sounds/\(name).\(ext)",
+                    "\(currentDir)/Sources/DeskBeat/Resources/Sounds/\(name).\(ext)",
                     "\(currentDir)/Resources/Sounds/\(name).\(ext)",
                     "\(currentDir)/Sounds/\(name).\(ext)"
                 ]
@@ -288,7 +288,7 @@ final class AudioEngineManager: ObservableObject {
     private func triggerVisualEffect(named name: String, source: String?) {
         DispatchQueue.main.async {
             NotificationCenter.default.post(
-                name: NSNotification.Name("MacBeatTriggeredEffect"),
+                name: NSNotification.Name("DeskBeatTriggeredEffect"),
                 object: name,
                 userInfo: source != nil ? ["source": source!] : nil
             )
@@ -299,7 +299,7 @@ final class AudioEngineManager: ObservableObject {
         engineQueue.sync {
             if engine.isRunning {
                 engine.pause()
-                print("[MacBeat] ⏸️ Motore Audio in pausa (Warm Standby)")
+                print("[DeskBeat] ⏸️ Motore Audio in pausa (Warm Standby)")
             }
         }
     }
@@ -318,7 +318,7 @@ final class AudioEngineManager: ObservableObject {
                 sampler.stopNote(60, onChannel: 0)
                 sampler.auAudioUnit.reset()
             }
-            print("[MacBeat] 🔇 App silenziosamente ripulita")
+            print("[DeskBeat] 🔇 App silenziosamente ripulita")
         }
     }
 
@@ -366,7 +366,7 @@ final class AudioEngineManager: ObservableObject {
                 try? fileManager.removeItem(at: fileURL)
             }
         }
-        print("[MacBeat] 🗑️ Rimosso fisicamente: \(name)")
+        print("[DeskBeat] 🗑️ Rimosso fisicamente: \(name)")
         
         // Eseguendo il reboot, il suono non verrà ricaricato e i vecchi nodi moriranno
         DispatchQueue.main.async {
