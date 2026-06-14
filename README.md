@@ -1,6 +1,12 @@
-# 🥁 DeskBeat
+<p align="center">
+  <img src="Sources/DeskBeat/Resources/images/logo.png" alt="DeskBeat logo" width="120" height="120">
+</p>
 
-**Turn your MacBook into a tactile drum machine.** DeskBeat is a native macOS menu-bar app that reads your laptop's built-in accelerometer to detect physical taps on the chassis (or the desk right next to it) and triggers drum samples — no MIDI controller, no microphone, just your hands and your Mac.
+<h1 align="center">🥁 DeskBeat</h1>
+
+<p align="center"><b>Turn your MacBook into a tactile drum machine.</b></p>
+
+DeskBeat is a native macOS menu-bar app that reads your laptop's built-in accelerometer to detect physical taps on the chassis (or the desk right next to it) and triggers drum samples — no MIDI controller, no microphone, just your hands and your Mac.
 
 > **Honest heads-up:** this is an experimental, fun project, not a precision instrument. The accelerometer is a great party trick and a fun way to bang out a simple beat, but it is **not** a replacement for real finger-drumming hardware. See [Limitations](#-honest-limitations) before you expect studio-grade timing. It is now **100% open source and free** — no license keys, no paywall.
 
