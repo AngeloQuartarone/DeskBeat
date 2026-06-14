@@ -1,88 +1,106 @@
-# 🥁 MacBeat
+# 🥁 DeskBeat
 
-**Turn your MacBook into a professional drum machine.** MacBeat is a high-performance macOS Menu Bar app that uses your laptop's built-in accelerometer to detect physical strikes on the chassis, triggering drum samples with ultra-low latency.
+**Turn your MacBook into a tactile drum machine.** DeskBeat is a native macOS menu-bar app that reads your laptop's built-in accelerometer to detect physical taps on the chassis (or the desk right next to it) and triggers drum samples — no MIDI controller, no microphone, just your hands and your Mac.
 
----
-
-## 🔥 Key Features
-
-### 1. Two Performance Modes
-*   **Standard Mode**: Real-time triggering of "Kick" and "Snare" (or "Bongo 1" and "Bongo 2"). Use vertical strikes for kicks and lateral strikes for snares. Includes "Invert Sides" for southpaw drummers.
-*   **Looper Mode**: Dynamic pattern recording using a focused, single-input trigger (Top or Side). Select an instrument on screen and tap your rhythm. MacBeat automatically detects the BPM, quantizes your performance, and loops it. Layer more instruments by switching pads mid-session.
-
-### 2. High-Fidelity Tap Detection
-*   **Apple Silicon Support**: Native integration with `AppleSPUHIDDriver` for M1, M2, and M3 Macs, bypassing legacy SMS APIs.
-*   **Gesture Recognition**: Distinguishes between **Vertical (TOP)** and **Lateral (SIDE)** hits by analyzing peak jerk (rate of change of acceleration).
-*   **Smart Lockout**: A 110ms cooldown window prevents phantom double-triggers from physical vibrations.
-*   **5-Level Sensitivity**: Adjustable thresholds from "Low" for heavy hitters to "Max" for delicate, finger-tip drumming.
-
-### 3. Infinite Sound Customization
-Import your own `.wav` or `.mp3` samples directly through the Settings UI. MacBeat securely preserves your custom sound library inside macOS's native `Application Support`, instantly generating new, color-coded pads for each unique sound that synchronize perfectly on the fly.
-
-### 4. Smart Focus Management
-To preserve battery and prevent accidental triggers, MacBeat only monitors the accelerometer when the popover is visible or when explicitly set to "Play in background".
+> **Honest heads-up:** this is an experimental, fun project, not a precision instrument. The accelerometer is a great party trick and a fun way to bang out a simple beat, but it is **not** a replacement for real finger-drumming hardware. See [Limitations](#-honest-limitations) before you expect studio-grade timing. It is now **100% open source and free** — no license keys, no paywall.
 
 ---
 
-## 🛠️ Requirements
+## ✨ What it does
 
-- **macOS 14.0+** (Sonoma or later)
-- **Apple Silicon Mac** (highly recommended) or Intel Mac with built-in accelerometer
-- **Xcode 15+** (for building from source)
+- **Standard mode** — real-time triggering. Tap the top/palm-rest area for one sound, the side of the chassis for another. Includes an *Invert sides* option for lefties.
+- **Looper mode** — tap a rhythm, DeskBeat estimates the BPM and quantizes it onto a 16-step / 1-bar grid, then loops it. Switch pads to layer more instruments.
+- **Custom sounds** — import your own `.wav` / `.mp3` samples in Settings; they become playable pads.
+- **Adjustable sensitivity** — 5 levels, from "heavy hits only" to "light fingertips".
+- **Battery friendly** — the accelerometer is only woken while the popover is open (or when *Play in background* is enabled).
 
----
+## 🧠 How it works
 
-## 🚀 Quick Start
+Apple Silicon MacBooks contain an undocumented MEMS accelerometer (a Bosch IMU) exposed through the private `AppleSPUHIDDriver` IOKit interface. DeskBeat:
 
-### 1. Build & Run
-1. Open `Package.swift` in Xcode.
-2. Select the **MacBeat** target.
-3. Under **Signing & Capabilities**:
-    - Set your Development Team.
-    - **Disable App Sandbox** (Required to access low-level HID reports from the accelerometer).
-4. Press **⌘R**. The 🎵 icon will appear in your menu bar. 
+1. Wakes the sensor to ~100 Hz via `IORegistryEntrySetCFProperty`.
+2. Reads raw HID reports and parses the X/Z axes (`int32`, little-endian, scaled by `1/65536`).
+3. Low-pass filters out gravity to get linear acceleration, then computes **jerk** (its derivative).
+4. Fires a trigger when peak jerk crosses the sensitivity threshold, with a 110 ms lock-out to suppress double hits.
+5. Classifies the hit as **TOP** vs **SIDE** from the ratio of lateral to vertical jerk.
 
-### 2. Play!
-- **Standard**: Tap the palm rest (Top hit) for Kick, or the side of the chassis (Side hit) for Snare.
-- **Looper**: Switch to Looper mode, select a pad, and start tapping. MacBeat starts recording on the first tap and closes the loop after a brief silence.
+Audio is played through `AVAudioEngine` (`AVAudioUnitSampler` → compressor → peak limiter).
 
-### 3. Add Your Own Sounds
-Go to **Settings** (gear icon) and click **"Add Sounds"**. Select your audio files, and they will instantly appear as playable pads in Looper mode.
+This relies on a **private, undocumented API**. Prior reverse-engineering work that documents the same interface: [olvvier/apple-silicon-accelerometer](https://github.com/olvvier/apple-silicon-accelerometer) and [taigrr/apple-silicon-accelerometer](https://github.com/taigrr/apple-silicon-accelerometer). Thanks to them.
 
 ---
 
-## 🧠 Technical Details
+## 🛠 Requirements
 
-### Architecture
+- **Apple Silicon MacBook** (M1 or newer). ⚠️ Mac **desktops** (mini, iMac, Studio, Pro) have no accelerometer and are **not supported**. Intel Macs do not expose the sensor to apps.
+- **macOS 14 (Sonoma) or later**
+- **Xcode 15+** / Swift 5.9+ to build
+- **App Sandbox must be OFF** — direct access to the private HID sensor is blocked by the sandbox. The bundled [`DeskBeat.entitlements`](DeskBeat.entitlements) already sets `com.apple.security.app-sandbox` to `false`.
 
-| Component | Purpose |
+## 🚀 Build & run
+
+The fastest way, from this directory:
+
+```bash
+swift run DeskBeat
+```
+
+A 🥁 icon appears in your menu bar. Click it to open the app.
+
+Or in Xcode:
+
+1. Open `Package.swift`.
+2. Select the **DeskBeat** scheme.
+3. (If signing) set your Development Team and keep **App Sandbox disabled** under *Signing & Capabilities*.
+4. Press **⌘R**.
+
+### Building a distributable `.app` / DMG
+
+A helper script is included:
+
+```bash
+./build_dmg.sh
+```
+
+Note: to share the app with others without Gatekeeper warnings you need an Apple **Developer ID** and **notarization**. Because the app is un-sandboxed, it **cannot** be distributed on the Mac App Store.
+
+---
+
+## 🎮 How to play
+
+1. Put your MacBook on a **stable, solid desk** (flimsy/bouncy surfaces hurt detection).
+2. **Standard mode:** tap the palm-rest area and the side of the chassis. Tune the sensitivity slider until taps register cleanly.
+3. **Looper mode:** pick a pad, tap a steady rhythm, pause — DeskBeat detects the tempo and loops it. Switch pads to layer instruments.
+4. **Custom kits:** Settings → *Add Sounds* to import your own samples.
+
+---
+
+## ⚠️ Honest limitations
+
+These are inherent to using a vibration sensor as a drum trigger — worth knowing before judging it:
+
+- **Timing isn't sample-accurate.** The looper sequencer runs on a main-thread timer, so loops can drift/jitter under load. Don't expect a tight studio grid.
+- **~110 ms lock-out** caps you at roughly 9 hits/second — fast rolls and double-strokes won't register.
+- **Only two zones** (TOP/SIDE), distinguished by a simple heuristic — not a full pad layout.
+- **Surface-dependent.** Hit too hard → double triggers; too soft → nothing. The right surface + a bit of practice make a big difference.
+- **Private API.** A future macOS update could change the HID report layout and break detection.
+
+---
+
+## 🗂 Architecture
+
+| File | Responsibility |
 |---|---|
-| `MacBeatApp.swift` | App lifecycle and Menu Bar management. |
-| `MotionManager.swift` | Manages `IOHIDManager`, wakes `AppleSPUHIDDriver`, and handles peak-jerk tap recognition. |
-| `AudioEngineManager.swift` | Low-latency `AVAudioEngine` implementation with dynamic sample management. |
-| `LooperManager.swift` | Real-time rhythm logic: BPM detection, quantization, and event scheduling. |
-| `ContentView.swift` | Modern SwiftUI entry point acting as a macroscopic layout router. |
-| `StandardModeView.swift` | Dedicated interface for real-time live performance mapping. |
-| `LooperModeView.swift` | Dedicated UI for dynamic pattern visualization and overdubbing control. |
-| `SettingsView.swift` | Interface for configuration: thresholds, bindings, and custom sound imports. |
-| `MacBeatComponents.swift` | Reusable UI library (e.g., `DrumPadView`, responsive `LooperPadView`). |
-
-### Tap Recognition Algorithm
-1. **Raw Data**: Polls 3-axis accelerometer data at high frequency via HID.
-2. **Filtering**: Applies a low-pass filter to isolate gravity, then subtracts it to get linear acceleration.
-3. **Jerk Analysis**: Calculates the rate of change (Jerk). A trigger is fired when Jerk exceeds the sensitivity threshold.
-4. **Classification**: Uses the ratio of X (lateral) to Z (vertical) jerk to distinguish hit location: `xMagnitude > (zMagnitude * 0.35)` is classified as **SIDE**.
+| `DeskBeatApp.swift` | App lifecycle, menu-bar entry point, tap → sound routing |
+| `MotionManager.swift` | IOKit HID access, sensor wake/sleep, jerk-based tap detection |
+| `AudioEngineManager.swift` | `AVAudioEngine` setup, sample loading, custom-sound import |
+| `LooperManager.swift` | BPM estimation, quantization, 16-step sequencer playback |
+| `ContentView.swift` | Layout router between Standard / Looper / Settings |
+| `StandardModeView.swift` · `LooperModeView.swift` · `SettingsView.swift` · `OnboardingView.swift` | UI screens |
+| `DeskBeatComponents.swift` | Reusable UI components (drum pads, rows) |
 
 ---
 
-## 🏗️ Permissions & Privacy
-- **App Sandbox**: Must be disabled. The app requires direct access to the `AppleSPUHIDDevice` to read raw sensor data which is blocked by the default sandbox.
-- **Microphone**: Not required. All detection is physical/mechanical.
+## 📜 License
 
----
-
-## ⚖️ License
-
-Copyright (c) 2026 Angelo Quartarone. All rights reserved.
-
-This source code is confidential and private. Unauthorized copying, distribution, or use is strictly prohibited.
+MIT — see [LICENSE](LICENSE). Built by Angelo Quartarone. Contributions and forks welcome.

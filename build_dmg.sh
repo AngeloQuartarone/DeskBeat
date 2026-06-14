@@ -3,7 +3,7 @@
 # Abilita la terminazione in caso di errori
 set -e
 
-APP_NAME="MacBeat"
+APP_NAME="DeskBeat"
 BUILD_DIR=".build"
 APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
 CONTENTS_DIR="${APP_BUNDLE}/Contents"
@@ -37,13 +37,13 @@ if [ -d "${ACTUAL_RELEASE_DIR}/${APP_NAME}_${APP_NAME}.bundle" ]; then
 fi
 
 echo "⚙️ 5. Generazione Info.plist..."
-cp "Sources/MacBeat/Info.plist" "${CONTENTS_DIR}/Info.plist"
+cp "Sources/DeskBeat/Info.plist" "${CONTENTS_DIR}/Info.plist"
 
 # Assicuriamoci che abbia la stringa PkgInfo necessaria per le App macOS
 echo "APPL????" > "${CONTENTS_DIR}/PkgInfo"
 
 echo "🎨 6. Creazione dell'icona (AppIcon.icns)..."
-LOGO_PATH="Sources/MacBeat/Resources/images/logo.png"
+LOGO_PATH="Sources/DeskBeat/Resources/images/logo.png"
 ICONSET_DIR="${BUILD_DIR}/AppIcon.iconset"
 
 if [ -f "$LOGO_PATH" ]; then
@@ -82,28 +82,22 @@ DMG_SRC_DIR="${BUILD_DIR}/dmg_source"
 rm -rf "${DMG_SRC_DIR}"
 mkdir -p "${DMG_SRC_DIR}"
 
-# Sposta l'app nella cartella 
+# Sposta l'app nella cartella
 cp -R "${APP_BUNDLE}" "${DMG_SRC_DIR}/"
 
-# Copia il launcher AppleScript (assicurati che il nome del file coincida)
-if [ -d "Avvia MacBeat.app" ]; then
-    cp -R "Avvia MacBeat.app" "${DMG_SRC_DIR}/"
-else
-    echo "⚠️ Attenzione: 'Avvia MacBeat.app' non trovato nella root del progetto!"
-fi
-
-# Crea il file Leggimi.txt con le istruzioni per i beta tester
+# Crea il file Leggimi.txt con le istruzioni di installazione
 cat << 'EOF' > "${DMG_SRC_DIR}/Leggimi.txt"
-🥁 BENVENUTO NELLA BETA DI MACBEAT 🥁
+🥁 DESKBEAT
 
-Per testare correttamente il rilevamento dei tocchi ad alta fedeltà, segui questi 3 passaggi:
+1. Trascina l'icona "DeskBeat" nella cartella "Applications" qui a fianco.
+2. Apri DeskBeat. Comparirà un'icona nella barra dei menu in alto.
 
-1. Trascina l'icona "MacBeat" nella cartella "Applications" qui a fianco. (Questo è obbligatorio).
-2. Copia l'icona "Avvia MacBeat" dove preferisci (ad esempio sul tuo Desktop o in Applicazioni).
-3. Usa SEMPRE e SOLO "Avvia MacBeat" per aprire l'app.
+⚠️ Nota:
+DeskBeat ha l'App Sandbox disattivata perché deve accedere all'accelerometro
+integrato (tramite IOKit). Funziona solo su MacBook Apple Silicon (M1 o successivi).
 
-⚠️ Nota sulla Sicurezza:
-Al primo avvio tramite il launcher ti verrà richiesta la password del Mac. Questo è un passaggio normale e temporaneo per questa versione Beta. MacBeat necessita di questi privilegi per poter accedere in tempo reale all'accelerometro integrato nel telaio.
+Se preferisci, puoi anche compilarlo dai sorgenti con:  swift run DeskBeat
+Codice e licenza MIT: vedi il repository del progetto.
 EOF
 
 # Aggiungi un symlink verso la cartella Applicazioni

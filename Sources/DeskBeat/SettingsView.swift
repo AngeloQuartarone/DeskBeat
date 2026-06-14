@@ -6,8 +6,6 @@ struct SettingsView: View {
     @ObservedObject var motionManager: MotionManager
     @ObservedObject var looper: LooperManager
     @ObservedObject var audioEngine = AudioEngineManager.shared
-    @ObservedObject var licenseManager = LicenseManager.shared
-    @AppStorage("hasShownOnboarding") var hasShownOnboarding: Bool = false
     @Binding var showingOnboarding: Bool
     
     @State private var refreshID = UUID()
@@ -138,37 +136,7 @@ struct SettingsView: View {
                         .padding(.top, 4)
                     }
                 }
-                .disabled(!licenseManager.isUnlocked)
-                .opacity(licenseManager.isUnlocked ? 1.0 : 0.4)
-                
-                if !licenseManager.isUnlocked {
-                    HStack {
-                        Image(systemName: "lock.fill")
-                        Text("Unlock DeskBeat Pro to access all features.")
-                    }
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
-                }
-                
-                #if DEBUG
-                VStack(spacing: 12) {
-                    Button("Reset Setup State (Onboarding)") {
-                        hasShownOnboarding = false
-                    }
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.orange)
 
-                    Button("Reset License (Debug)") {
-                        licenseManager.clearLicense()
-                    }
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.red)
-                }
-                .padding(.top, 12)
-                .buttonStyle(.plain)
-                #endif
-                
                 Spacer(minLength: 24)
             }
         }

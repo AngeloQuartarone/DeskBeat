@@ -44,29 +44,15 @@ struct DeskBeatApp: App {
         
         DispatchQueue.main.async {
             MotionManager.shared.onTapDetected = { side, rawTap in
-                let isUnlocked = LicenseManager.shared.isUnlocked
-                
-                // 1. Moda Looper
+                // 1. Looper mode
                 if !MotionManager.shared.isShowingSettings && LooperManager.shared.isLooperMode {
-                    if isUnlocked {
-                        LooperManager.shared.processTap(rawTap: rawTap)
-                    }
+                    LooperManager.shared.processTap(rawTap: rawTap)
                     return
                 }
-                
-                // 2. Moda Standard (o Fallback in Settings per test sensibilità)
-                let isCustom = MotionManager.shared.selectedKit == "Custom"
-                
-                // Se siamo nella schermata principale, abbiamo scelto Custom e l'app è bloccata:
-                // l'utente sta vedendo la schermata Licenza. SILENZIAMO TOTALMENTE l'input fisico.
-                if !MotionManager.shared.isShowingSettings && isCustom && !isUnlocked {
-                    return
-                }
-                
-                // Se l'app è bloccata e siamo in "Settings" ignoriamo la selezione "Custom" 
-                // e forziamo "Classic" per permettergli comunque di ascoltare il test di Sensibilità
-                let effectiveKit = (isCustom && !isUnlocked) ? "Classic" : MotionManager.shared.selectedKit
-                
+
+                // 2. Standard mode
+                let effectiveKit = MotionManager.shared.selectedKit
+
                 let isInverted = MotionManager.shared.isInverted
                 let effectiveSide = isInverted ? (side == "LEFT" ? "RIGHT" : "LEFT") : side
                 

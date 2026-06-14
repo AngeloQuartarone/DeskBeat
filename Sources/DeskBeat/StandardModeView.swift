@@ -3,7 +3,6 @@ import SwiftUI
 struct StandardModeView: View {
     @ObservedObject var motionManager: MotionManager
     let visualEffects: [VisualEffect]
-    @ObservedObject var licenseManager = LicenseManager.shared
 
     var body: some View {
         VStack(spacing: 16) {
@@ -34,51 +33,46 @@ struct StandardModeView: View {
             }
 
             let isCustom = motionManager.selectedKit == "Custom"
-            
-            if isCustom && !licenseManager.isUnlocked {
-                LicenseView()
-                    .padding(.top, 8)
-            } else {
-                let leftSound  = isCustom ? motionManager.standardSideSound : "snare"
-                let rightSound = isCustom ? motionManager.standardTopSound  : "kick"
-                
-                let leftLabel  = leftSound.uppercased()
-                let rightLabel = rightSound.uppercased()
 
-                HStack(spacing: 10) {
-                    DrumPadView(
-                        label:      motionManager.isInverted ? rightLabel : leftLabel,
-                        accent:     motionManager.isInverted ? .orange : .blue,
-                        iconName:   "chevron.right",
-                        isFlashing: visualEffects.contains { $0.source == (motionManager.isInverted ? "RIGHT" : "LEFT") },
-                        isCustomizable: isCustom,
-                        onSoundSelected: { sound in
-                            if motionManager.isInverted {
-                                motionManager.standardTopSound = sound
-                            } else {
-                                motionManager.standardSideSound = sound
-                            }
-                        }
-                    )
-                    DrumPadView(
-                        label:      motionManager.isInverted ? leftLabel : rightLabel,
-                        accent:     motionManager.isInverted ? .blue : .orange,
-                        iconName:   "chevron.down",
-                        isFlashing: visualEffects.contains { $0.source == (motionManager.isInverted ? "LEFT" : "RIGHT") },
-                        isCustomizable: isCustom,
-                        onSoundSelected: { sound in
-                            if motionManager.isInverted {
-                                motionManager.standardSideSound = sound
-                            } else {
-                                motionManager.standardTopSound = sound
-                            }
-                        }
-                    )
-                }
-                .frame(height: 65)
+            let leftSound  = isCustom ? motionManager.standardSideSound : "snare"
+            let rightSound = isCustom ? motionManager.standardTopSound  : "kick"
 
-                MacToggleRow(label: "Invert sides", isOn: $motionManager.isInverted)
+            let leftLabel  = leftSound.uppercased()
+            let rightLabel = rightSound.uppercased()
+
+            HStack(spacing: 10) {
+                DrumPadView(
+                    label:      motionManager.isInverted ? rightLabel : leftLabel,
+                    accent:     motionManager.isInverted ? .orange : .blue,
+                    iconName:   "chevron.right",
+                    isFlashing: visualEffects.contains { $0.source == (motionManager.isInverted ? "RIGHT" : "LEFT") },
+                    isCustomizable: isCustom,
+                    onSoundSelected: { sound in
+                        if motionManager.isInverted {
+                            motionManager.standardTopSound = sound
+                        } else {
+                            motionManager.standardSideSound = sound
+                        }
+                    }
+                )
+                DrumPadView(
+                    label:      motionManager.isInverted ? leftLabel : rightLabel,
+                    accent:     motionManager.isInverted ? .blue : .orange,
+                    iconName:   "chevron.down",
+                    isFlashing: visualEffects.contains { $0.source == (motionManager.isInverted ? "LEFT" : "RIGHT") },
+                    isCustomizable: isCustom,
+                    onSoundSelected: { sound in
+                        if motionManager.isInverted {
+                            motionManager.standardSideSound = sound
+                        } else {
+                            motionManager.standardTopSound = sound
+                        }
+                    }
+                )
             }
+            .frame(height: 65)
+
+            MacToggleRow(label: "Invert sides", isOn: $motionManager.isInverted)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 16)
